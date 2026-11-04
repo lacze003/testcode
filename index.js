@@ -24,7 +24,24 @@ app.listen(PORT, () => {
 // ฟังก์ชันหน่วงเวลา (มิลลิวินาที)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function callGeminiWithFallback(promptText) {
+// แปลงรูปภาพจาก URL ให้เป็น Buffer สำหรับส่งให้ Gemini อ่าน
+async function urlToGenerativePart(url, mimeType) {
+    try {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        return {
+            inlineData: {
+                data: Buffer.from(arrayBuffer).toString("base64"),
+                mimeType
+            },
+        };
+    } catch (error) {
+        console.error("Error fetching image for Gemini:", error);
+        return null;
+    }
+}
+
+async function callGeminiWithFallback(promptText, imageParts = []) {
     const apiKeys = [
         process.env.GEMINI_API_KEY_1,
         process.env.GEMINI_API_KEY_2,
@@ -48,7 +65,10 @@ async function callGeminiWithFallback(promptText) {
                 console.log(`กำลังเรียกใช้ ${modelName} ด้วย Key ที่ ${i + 1}...`);
                 const genAI = new GoogleGenerativeAI(apiKeys[i]);
                 const model = genAI.getGenerativeModel({ model: modelName });
-                const result = await model.generateContent(promptText);
+                
+                // รวมข้อความและรูปภาพส่งให้ Gemini วิเคราะห์
+                const contents = [promptText, ...imageParts];
+                const result = await model.generateContent(contents);
                 const response = await result.response;
                 return response.text();
             } catch (error) {
@@ -116,15 +136,33 @@ client.on('messageCreate', async message => {
     if (message.channel.isThread()) {
         const threadId = message.channel.id;
         
+        // รวบรวมข้อความและรูปภาพแนบ (ถ้ามี)
+        let messagePayload = {
+            content: message.content || "",
+            images: []
+        };
+
+        if (message.attachments.size > 0) {
+            for (const attachment of message.attachments.values()) {
+                if (attachment.contentType && attachment.contentType.startsWith('image/')) {
+                    const imagePart = await urlToGenerativePart(attachment.url, attachment.contentType);
+                    if (imagePart) {
+                        messagePayload.images.push(imagePart);
+                    }
+                }
+            }
+        }
+        
         let postData = postDataMap.get(threadId);
         if (!postData) {
             postData = {
                 ownerId: message.author.id,
-                contents: [message.content],
+                contents: [messagePayload],
                 botMessage: null,
                 isConfirmed: false,
                 currentSummary: null,
                 pendingUpdateContent: null,
+                pendingUpdateImages: [],
                 updateBotMessage: null
             };
             postDataMap.set(threadId, postData);
@@ -143,7 +181,8 @@ client.on('messageCreate', async message => {
         } else {
             if (message.author.id === postData.ownerId) {
                 if (postData.isConfirmed) {
-                    postData.pendingUpdateContent = message.content;
+                    postData.pendingUpdateContent = messagePayload.content;
+                    postData.pendingUpdateImages = messagePayload.images;
 
                     const updateRow = new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
@@ -157,11 +196,11 @@ client.on('messageCreate', async message => {
                     }
 
                     postData.updateBotMessage = await message.reply({
-                        content: `📝 **ตรวจพบข้อความเพิ่มเติม:** "${message.content}"\nต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
+                        content: `📝 **ตรวจพบข้อความ/รูปภาพเพิ่มเติม** ต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
                         components: [updateRow]
                     });
                 } else {
-                    postData.contents.push(message.content);
+                    postData.contents.push(messagePayload);
                 }
             }
         }
@@ -197,15 +236,16 @@ client.on('interactionCreate', async interaction => {
     // 1. กดปุ่มยืนยันสรุปงานครั้งแรก
     if (interaction.customId === 'confirm_summary') {
         await interaction.update({
-            content: `⏳ **กำลังประมวลผลข้อมูลด้วย AI...**`,
+            content: `⏳ **กำลังประมวลผลข้อมูลและรูปภาพด้วย AI...**`,
             components: []
         });
 
-        const fullContent = postData.contents.join('\n');
+        const textContents = postData.contents.map(c => c.content).filter(Boolean).join('\n');
+        const allImages = postData.contents.flatMap(c => c.images);
 
         try {
-            const prompt = `วิเคราะห์โพสต์งานโรงกลึงนี้: "${fullContent}"
-(หมายเหตุ: คัดกรองและดึงเฉพาะข้อมูลเนื้อหาสาระสำคัญของงาน ตัดทิ้งคำทักทาย ส่วนหัวอีเมล ข้อความแชททั่วไป หรือคำถามที่ไม่เกี่ยวข้องออกให้หมด หากมีรูปภาพแคปหน้าจอแชท LINE หรืออีเมล ให้วิเคราะห์เฉพาะเนื้อหางาน)
+            const prompt = `วิเคราะห์โพสต์งานโรงกลึงจากข้อความและรูปภาพที่แนบมานี้: "${textContents}"
+(หมายเหตุ: หากมีรูปภาพแคปหน้าจอแชท LINE หรืออีเมล ให้ทำการอ่านและดึงข้อมูลจากภาพนั้นด้วย คัดกรองและดึงเฉพาะข้อมูลเนื้อหาสาระสำคัญของงาน ตัดทิ้งคำทักทาย ส่วนหัวอีเมล ข้อความแชททั่วไป หรือคำถามที่ไม่เกี่ยวข้องออกให้หมด หากเป็นรูปถ่ายชิ้นงานทั่วไปให้เพิกเฉย)
 
 วิเคราะห์และดึงข้อมูลตามเงื่อนไขอย่างเคร่งครัด:
 1. ชื่อบริษัทลูกค้า: มักเป็นตัวย่อ/ชื่อย่อ (เช่น CGS, GCME, OSC, COA, GME, GCM, GGC PTT LNG, PTTGC, GC, RMS, SAP, SCG, SRI, SYS, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
@@ -223,13 +263,12 @@ client.on('interactionCreate', async interaction => {
 - เลขงาน: [ระบุเลขงาน หรือ ยังไม่มี]
 - รายละเอียดงาน: [ระบุรายละเอียดงาน หรือ ไม่ระบุ]`;
 
-            const aiResponse = await callGeminiWithFallback(prompt);
-            const parsed = parseAiResponse(aiResponse, fullContent);
+            const aiResponse = await callGeminiWithFallback(prompt, allImages);
+            const parsed = parseAiResponse(aiResponse, textContents);
 
             const employeeName = interaction.member ? interaction.member.displayName : interaction.user.username;
             const currentDate = new Date().toISOString().split('T')[0];
             
-            // ตั้งชื่อ Thread: หากมีเลขงานให้ใส่เลขงานต่อท้ายด้วย หากยังไม่มีให้ใส่แค่วันที่และบริษัท
             let newThreadName = `${currentDate} - ${parsed.companyName !== "ไม่ระบุ" ? parsed.companyName : "งานใหม่"}`;
             if (parsed.jobNumber !== "ยังไม่มี") {
                 newThreadName += ` - ${parsed.jobNumber}`;
@@ -303,7 +342,7 @@ client.on('interactionCreate', async interaction => {
 - เลขงาน: ${postData.currentSummary.jobNumber}
 - รายละเอียดงาน: ${postData.currentSummary.jobDetails}
 
-ข้อความแก้ไขหรือเพิ่มติมที่ส่งมาใหม่: "${postData.pendingUpdateContent}"
+ข้อความ/รูปภาพแก้ไขหรือเพิ่มเติมที่ส่งมาใหม่: "${postData.pendingUpdateContent}"
 
 จงอัปเดตข้อมูลทั้งหมดให้สอดคล้องกับข้อความใหม่ โดยคงค่าเดิมไว้หากไม่มีการพูดถึงการเปลี่ยนแปลง (กรองเอาเฉพาะเนื้อหางานสำคัญ ตัดคำทักทายออก) หากข้อมูลส่วนไหนไม่มีการระบุ ให้ตอบว่า "ไม่ระบุ" (เฉพาะเลขงานถ้าไม่มีให้ตอบว่า "ยังไม่มี") และจัดรูปแบบการตอบดังนี้:
 - ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท/ชื่อย่อ หรือ ไม่ระบุ]
@@ -313,7 +352,7 @@ client.on('interactionCreate', async interaction => {
 - เลขงาน: [ระบุเลขงาน หรือ ยังไม่มี]
 - รายละเอียดงาน: [ระบุรายละเอียดงาน หรือ ไม่ระบุ]`;
 
-            const aiResponse = await callGeminiWithFallback(updatePrompt);
+            const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
             const parsed = parseAiResponse(aiResponse, postData.currentSummary.jobDetails);
 
             const currentDate = new Date().toISOString().split('T')[0];
@@ -352,6 +391,7 @@ client.on('interactionCreate', async interaction => {
 
             postData.currentSummary = parsed;
             postData.pendingUpdateContent = null;
+            postData.pendingUpdateImages = [];
 
         } catch (err) {
             console.error("Update Error:", err);
