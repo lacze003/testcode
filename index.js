@@ -224,7 +224,7 @@ client.on('interactionCreate', async interaction => {
 
     if (!isOwner && !hasSummaryRole) {
         return interaction.reply({ 
-            content: '❌ เฉพาะเจ้าของโพสต์ หรือผู้ที่มียศ "summary" เท่านั้นที่มีสิทธิ์กดปุ่มนี้ครับ', 
+            content: '❌ เฉพาะเจ้าของโพสต์ หรือผู้ที่มีมีสิทธิ์กดปุ่มนี้ครับ', 
             ephemeral: true 
         });
     }
@@ -417,4 +417,4 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN);	
