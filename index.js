@@ -104,7 +104,7 @@ function parseAiResponse(aiResponse, fallbackDetails) {
         } else if (cleanLine.includes('กำหนดส่งมอบ')) {
             const parts = cleanLine.split(':');
             if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') dueDate = parts[1].trim();
-        } else if (cleanLine.includes('เลขงาน')) {
+        } else if (cleanLine.includes('เลขjob')) {
             const parts = cleanLine.split(':');
             if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== 'ยังไม่มี') jobNumber = parts[1].trim();
         } else if (cleanLine.includes('รายละเอียดงาน')) {
@@ -136,7 +136,6 @@ client.on('messageCreate', async message => {
     if (message.channel.isThread()) {
         const threadId = message.channel.id;
         
-        // รวบรวมข้อความและรูปภาพแนบ (ถ้ามี)
         let messagePayload = {
             content: message.content || "",
             images: []
@@ -220,7 +219,6 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    // 🔒 ตรวจสอบว่าผู้กดเป็นเจ้าของโพสต์ หรือมียศชื่อว่า "summary" หรือไม่
     const isOwner = interaction.user.id === postData.ownerId;
     const hasSummaryRole = interaction.member && interaction.member.roles.cache.some(role => role.name.toLowerCase() === 'summary');
 
@@ -246,19 +244,23 @@ client.on('interactionCreate', async interaction => {
 (หมายเหตุ: คัดกรองและดึงเฉพาะข้อมูลเนื้อหาสาระสำคัญของงาน ตัดทิ้งคำทักทาย ส่วนหัวอีเมล ข้อความแชททั่วไป หรือคำถามที่ไม่เกี่ยวข้องออกให้หมด หากเป็นรูปถ่ายชิ้นงานทั่วไปให้เพิกเฉย)
 
 วิเคราะห์และดึงข้อมูลตามเงื่อนไขอย่างเคร่งครัด:
-1. ชื่อบริษัทลูกค้า: มักเป็นตัวย่อ/ชื่อย่อ (เช่น CGS, GCME, OSC, COA, GME, GCM, GGC PTT LNG, PTTGC, GC, RMS, SAP, SCG, SRI, SYS, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
+1. ชื่อบริษัทลูกค้า: มักเป็นชื่อย่อหรือชื่อโรงงาน/โซนพื้นที่ต่างๆ ให้ตรวจจับและระบุเลขสาขาหรือโซนติดมาด้วยเสมอ โดยรองรับรูปแบบการเขียนทุกประเภท (ทั้งแบบพิมพ์ติดกัน, เว้นวรรค, หรือมีเครื่องหมายขีด -) ดังนี้:
+   - SYS: รองรับ SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
+   - GC: รองรับตั้งแต่ 1 ถึง 19 เช่น GC1 ถึง GC19, GC 1 ถึง GC 19, GC-1 ถึง GC-19, PTT GC-1 ถึง PTT GC-19
+   - GGC: รองรับ GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
+   - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
 2. ชื่อลูกค้า: มักจะมีคำว่า "k.", "คุณ", หรือชื่อบุคคลต่อท้าย (เช่น k.สาคร, คุณสาคร, ช่างสาคร) **หากข้อมูลหรือภาพถ่ายมาจากแชท LINE ให้ไม่ต้องเก็บชื่อลูกค้า และตอบว่า "ไม่ระบุ" ทันที** หากเป็นช่องทางอื่นและไม่มีให้ตอบว่า "ไม่ระบุ"
 3. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
 4. กำหนดส่งมอบ: หากในข้อความหรือรูปแชทมีระบุวันส่งหรือคำบอกเวลา เช่น "เอาพรุ่งนี้", "ส่งวันศุกร์", หรือระบุวันที่ ให้ดึงมาตอบที่นี่ แต่ถ้าไม่มีให้ตอบว่า "ไม่ระบุ"
-5. เลขงาน: ค้นหาเลขที่ใบงานหรือเลขอ้างอิง (เช่น รูปแบบ 6 หลัก เช่น 260000 หรือรูปแบบ Q เช่น Q26/300) หากไม่พบให้ตอบว่า "ยังไม่มี"
+5. เลขjob: ค้นหาเลขที่ใบงานหรือเลขอ้างอิง (เช่น รูปแบบ 6 หลัก เช่น 260000 หรือรูปแบบ Q เช่น Q26/300) หากไม่พบให้ตอบว่า "ยังไม่มี"
 6. รายละเอียดงาน: สรุปเฉพาะรายละเอียดสเปกงานหรือเนื้อหาคำสั่งงานสำคัญๆ เท่านั้น (ตัดคำทักทายออก) หากไม่มีให้ตอบว่า "ไม่ระบุ"
 
 จัดรูปแบบการตอบดังนี้:
-- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท/ชื่อย่อ หรือ ไม่ระบุ]
+- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท/ชื่อย่อ/โซน/สาขา หรือ ไม่ระบุ]
 - ชื่อลูกค้า: [ระบุชื่อลูกค้า หรือ ไม่ระบุ]
 - ประเภทงาน: [ทำใหม่, แก้ไข, หรือ ไม่ระบุ]
 - กำหนดส่งมอบ: [ระบุวันส่งมอบ หรือ ไม่ระบุ]
-- เลขงาน: [ระบุเลขงาน หรือ ยังไม่มี]
+- เลขjob: [ระบุเลขjob หรือ ยังไม่มี]
 - รายละเอียดงาน: [ระบุรายละเอียดงาน หรือ ไม่ระบุ]`;
 
             const aiResponse = await callGeminiWithFallback(prompt, allImages);
@@ -287,7 +289,7 @@ client.on('interactionCreate', async interaction => {
                     { name: '👨‍💻 ชื่อพนักงาน (ผู้บันทึก)', value: employeeName, inline: false },
                     { name: '📌 ประเภทงาน', value: parsed.jobType, inline: false },
                     { name: '📅 กำหนดส่งมอบ', value: parsed.dueDate, inline: false },
-                    { name: '🔢 เลขงาน', value: parsed.jobNumber, inline: false },
+                    { name: '🔢 เลขjob', value: parsed.jobNumber, inline: false },
                     { name: '⚙️ รายละเอียดงาน', value: parsed.jobDetails, inline: false }
                 )
                 .setTimestamp();
@@ -337,17 +339,17 @@ client.on('interactionCreate', async interaction => {
 - ชื่อลูกค้า: ${postData.currentSummary.customerName}
 - ประเภทงาน: ${postData.currentSummary.jobType}
 - กำหนดส่งมอบ: ${postData.currentSummary.dueDate}
-- เลขงาน: ${postData.currentSummary.jobNumber}
+- เลขjob: ${postData.currentSummary.jobNumber}
 - รายละเอียดงาน: ${postData.currentSummary.jobDetails}
 
 ข้อความ/รูปภาพแก้ไขหรือเพิ่มเติมที่ส่งมาใหม่: "${postData.pendingUpdateContent}"
 
-จงอัปเดตข้อมูลทั้งหมดให้สอดคล้องกับข้อความใหม่ โดยคงค่าเดิมไว้หากไม่มีการพูดถึงการเปลี่ยนแปลง (หากมาจากแชท LINE ให้คงชื่อลูกค้าเป็น "ไม่ระบุ") หากข้อมูลส่วนไหนไม่มีการระบุ ให้ตอบว่า "ไม่ระบุ" (เฉพาะเลขงานถ้าไม่มีให้ตอบว่า "ยังไม่มี") และจัดรูปแบบการตอบดังนี้:
-- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท/ชื่อย่อ หรือ ไม่ระบุ]
+จงอัปเดตข้อมูลทั้งหมดให้สอดคล้องกับข้อความใหม่ โดยคงค่าเดิมไว้หากไม่มีการพูดถึงการเปลี่ยนแปลง (หากมาจากแชท LINE ให้คงชื่อลูกค้าเป็น "ไม่ระบุ") หากข้อมูลส่วนไหนไม่มีการระบุ ให้ตอบว่า "ไม่ระบุ" (เฉพาะเลขjob ถ้าไม่มีให้ตอบว่า "ยังไม่มี") และจัดรูปแบบการตอบดังนี้:
+- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท/ชื่อย่อ/โซน/สาขา หรือ ไม่ระบุ]
 - ชื่อลูกค้า: [ระบุชื่อลูกค้า หรือ ไม่ระบุ]
 - ประเภทงาน: [ทำใหม่, แก้ไข, หรือ ไม่ระบุ]
 - กำหนดส่งมอบ: [ระบุวันส่งมอบ หรือ ไม่ระบุ]
-- เลขงาน: [ระบุเลขงาน หรือ ยังไม่มี]
+- เลขjob: [ระบุเลขjob หรือ ยังไม่มี]
 - รายละเอียดงาน: [ระบุรายละเอียดงาน หรือ ไม่ระบุ]`;
 
             const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
@@ -376,7 +378,7 @@ client.on('interactionCreate', async interaction => {
                     { name: '👨‍💻 ชื่อพนักงาน (ผู้บันทึก)', value: employeeName, inline: false },
                     { name: '📌 ประเภทงาน', value: parsed.jobType, inline: false },
                     { name: '📅 กำหนดส่งมอบ', value: parsed.dueDate, inline: false },
-                    { name: '🔢 เลขงาน', value: parsed.jobNumber, inline: false },
+                    { name: '🔢 เลขjob', value: parsed.jobNumber, inline: false },
                     { name: '⚙️ รายละเอียดงาน', value: parsed.jobDetails, inline: false }
                 )
                 .setTimestamp();
