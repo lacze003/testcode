@@ -327,42 +327,68 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม (อัปเดตให้ดึงข้อมูลจากสรุปเดิมมา Merge ด้วย ไม่ให้ข้อมูลเก่าหาย)
+    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม (ดึงข้อมูลจาก Embed สรุปอันล่าสุดในแชทมาแก้ไขเพิ่มเติม)
     if (interaction.customId === 'confirm_update') {
         await interaction.update({
-            content: `⏳ **กำลังอัปเดตสรุปข้อมูลด้วย AI...**`,
+            content: `⏳ **กำลังดึงข้อมูลสรุปอันล่าสุดมาอัปเดตด้วย AI...**`,
             components: []
         });
 
         try {
-            const oldSummary = postData.currentSummary || {};
-            const allTextCombined = `ข้อมูลสรุปเดิมที่มีอยู่แล้ว (ห้ามทำข้อมูลเหล่านี้หายเด็ดขาด ให้คงค่าเดิมไว้ถ้ารายละเอียดใหม่ไม่มีการสั่งเปลี่ยน):
-- ชื่อบริษัทลูกค้าเดิม: ${oldSummary.companyName || 'ไม่ระบุ'}
-- ชื่อลูกค้าเดิม: ${oldSummary.customerName || 'ไม่ระบุ'}
-- ประเภทงานเดิม: ${oldSummary.jobType || 'ไม่ระบุ'}
-- กำหนดส่งมอบเดิม: ${oldSummary.dueDate || 'ไม่ระบุ'}
-- เลขjob เดิม: ${oldSummary.jobNumber || 'ยังไม่มี'}
-- รายละเอียดงานเดิม: ${oldSummary.jobDetails || 'ไม่ระบุ'}
+            let latestSummaryData = {
+                companyName: "ไม่ระบุ",
+                customerName: "ไม่ระบุ",
+                jobType: "ไม่ระบุ",
+                dueDate: "ไม่ระบุ",
+                jobNumber: "ยังไม่มี",
+                jobDetails: "ไม่ระบุ"
+            };
 
-ข้อความหรือข้อมูลใหม่ที่พนักงานพิมพ์เพิ่มเข้ามาในเธรด: "${postData.pendingUpdateContent}"`;
+            const messages = await interaction.channel.messages.fetch({ limit: 20 });
+            for (const msg of messages.values()) {
+                if (msg.author.id === client.user.id && msg.embeds.length > 0) {
+                    const embed = msg.embeds[0];
+                    if (embed.title && embed.title.includes('สรุปข้อมูลงาน')) {
+                        for (const field of embed.fields) {
+                            if (field.name.includes('ชื่อบริษัทลูกค้า')) latestSummaryData.companyName = field.value;
+                            if (field.name.includes('ชื่อลูกค้า')) latestSummaryData.customerName = field.value;
+                            if (field.name.includes('ประเภทงาน')) latestSummaryData.jobType = field.value;
+                            if (field.name.includes('กำหนดส่งมอบ')) latestSummaryData.dueDate = field.value;
+                            if (field.name.includes('เลขjob')) latestSummaryData.jobNumber = field.value;
+                            if (field.name.includes('รายละเอียดงาน')) latestSummaryData.jobDetails = field.value;
+                        }
+                        break;
+                    }
+                }
+            }
 
-            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมดเพื่ออัปเดตสรุปงานโดยผสานข้อมูลเก่าและข้อมูลใหม่เข้าด้วยกัน:
-1. หากข้อมูลใหม่เป็นการพิมพ์เลข Job หรือเพิ่มข้อความสั้นๆ ให้คงค่าข้อมูลเดิม (ชื่อบริษัท, ประเภทงาน, กำหนดส่งมอบเดิม) เอาไว้ทั้งหมด ห้ามเปลี่ยนเป็น "ไม่ระบุ"
-2. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" (อิงจากข้อมูลเดิมหรือข้อมูลใหม่)
-3. กำหนดส่งมอบ: ดึงกำหนดส่งจากข้อมูลเดิม หรืออัปเดตหากมีข้อมูลใหม่
-4. เลขjob: อัปเดตเลข Job ใหม่ที่พนักงานพิมพ์เข้ามา
+            const allTextCombined = `ข้อมูลจากสรุปอันล่าสุดในแชท (ใช้เป็นฐานข้อมูลหลัก ห้ามทำให้ข้อมูลเหล่านี้หายเด็ดขาด):
+- ชื่อบริษัทลูกค้าเดิม: ${latestSummaryData.companyName}
+- ชื่อลูกค้าเดิม: ${latestSummaryData.customerName}
+- ประเภทงานเดิม: ${latestSummaryData.jobType}
+- กำหนดส่งมอบเดิม: ${latestSummaryData.dueDate}
+- เลขjob เดิม: ${latestSummaryData.jobNumber}
+- รายละเอียดงานเดิม: ${latestSummaryData.jobDetails}
+
+ข้อความหรือข้อมูลใหม่ที่พนักงานพิมพ์เพิ่มเข้ามาเพื่อแก้ไข/เพิ่มเติม: "${postData.pendingUpdateContent}"`;
+
+            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมดเพื่อแก้ไขและอัปเดตสรุปงานโดยผสานข้อมูลเก่าและข้อมูลใหม่เข้าด้วยกัน:
+1. นำข้อมูลจากสรุปอันล่าสุดมาเป็นหลัก หากข้อมูลใหม่เป็นการเพิ่มข้อความหรือแก้ไขเฉพาะจุด ให้ปรับแก้เฉพาะจุดนั้น ส่วนข้อมูลเดิมที่ยังถูกต้องให้คงไว้ ห้ามเปลี่ยนเป็น "ไม่ระบุ"
+2. ประเภทงาน: ระบุประเภทงานเดิมหรืออัปเดต
+3. กำหนดส่งมอบ: ระบุวันส่งมอบเดิมหรืออัปเดต
+4. เลขjob: อัปเดตเลข Job ใหม่หรือคงค่าเดิม
 5. รายละเอียดงาน: นำรายละเอียดงานเดิมมาผสานหรือต่อท้ายด้วยข้อมูลใหม่ ห้ามปล่อยว่างและห้ามทิ้งของเดิม
 
 จัดรูปแบบการตอบดังนี้:
-- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัทเดิมหรืออัปเดต]
-- ชื่อลูกค้า: [ระบุชื่อลูกค้าเดิมหรืออัปเดต]
-- ประเภทงาน: [ระบุประเภทงานเดิมหรืออัปเดต]
-- กำหนดส่งมอบ: [ระบุวันส่งมอบเดิมหรืออัปเดต]
-- เลขjob: [ระบุเลขjob ใหม่หรืออัปเดต]
+- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัทเดิมหรือที่แก้ไขใหม่]
+- ชื่อลูกค้า: [ระบุชื่อลูกค้าเดิมหรือที่แก้ไขใหม่]
+- ประเภทงาน: [ระบุประเภทงานเดิมหรือที่แก้ไขใหม่]
+- กำหนดส่งมอบ: [ระบุวันส่งมอบเดิมหรือที่แก้ไขใหม่]
+- เลขjob: [ระบุเลขjob เดิมหรือที่แก้ไขใหม่]
 - รายละเอียดงาน: [ระบุรายละเอียดงานเดิมและใหม่รวมกัน ห้ามว่าง]`;
 
             const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
-            const parsed = parseAiResponse(aiResponse, postData.currentSummary.jobDetails);
+            const parsed = parseAiResponse(aiResponse, latestSummaryData.jobDetails);
 
             const currentDate = new Date().toISOString().split('T')[0];
             let newThreadName = `${currentDate} - ${parsed.companyName !== "ไม่ระบุ" ? parsed.companyName : "งานอัปเดต"}`;
