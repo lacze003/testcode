@@ -1,12 +1,12 @@
 require('dotenv').config();
 const express = require('express');
 const { 
-    Client, 
-    GatewayIntentBits, 
-    EmbedBuilder, 
-    ActionRowBuilder, 
-    ButtonBuilder, 
-    ButtonStyle 
+  Client, 
+  GatewayIntentBits, 
+  EmbedBuilder, 
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle 
 } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
@@ -21,25 +21,10 @@ app.listen(PORT, () => {
     console.log(`Owner Server listening on port ${PORT}`);
 });
 
+// ฟังก์ชันหน่วงเวลา (มิลลิวินาที)
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function urlToGenerativePart(url, mimeType) {
-    try {
-        const response = await fetch(url);
-        const arrayBuffer = await response.arrayBuffer();
-        return {
-            inlineData: {
-                data: Buffer.from(arrayBuffer).toString("base64"),
-                mimeType
-            },
-        };
-    } catch (error) {
-        console.error("Error fetching image for Gemini:", error);
-        return null;
-    }
-}
-
-async function callGeminiWithFallback(promptText, imageParts = []) {
+async function callGeminiWithFallback(promptText) {
     const apiKeys = [
         process.env.GEMINI_API_KEY_1,
         process.env.GEMINI_API_KEY_2,
@@ -51,7 +36,7 @@ async function callGeminiWithFallback(promptText, imageParts = []) {
     }
 
     const modelsToTry = [
-        "gemini-3.5-flash-lite",
+	"gemini-3.5-flash-lite",
         "gemini-3.8-flash"
     ];
     
@@ -63,9 +48,7 @@ async function callGeminiWithFallback(promptText, imageParts = []) {
                 console.log(`กำลังเรียกใช้ ${modelName} ด้วย Key ที่ ${i + 1}...`);
                 const genAI = new GoogleGenerativeAI(apiKeys[i]);
                 const model = genAI.getGenerativeModel({ model: modelName });
-                
-                const contents = [promptText, ...imageParts];
-                const result = await model.generateContent(contents);
+                const result = await model.generateContent(promptText);
                 const response = await result.response;
                 return response.text();
             } catch (error) {
@@ -82,8 +65,6 @@ function parseAiResponse(aiResponse, fallbackDetails) {
     let companyName = "ไม่ระบุ";
     let customerName = "ไม่ระบุ";
     let jobType = "ไม่ระบุ";
-    let dueDate = "ไม่ระบุ";
-    let jobNumber = "ยังไม่มี";
     let jobDetails = fallbackDetails || "ไม่ระบุ";
 
     const lines = aiResponse.split('\n');
@@ -98,19 +79,13 @@ function parseAiResponse(aiResponse, fallbackDetails) {
         } else if (cleanLine.includes('ประเภทงาน')) {
             const parts = cleanLine.split(':');
             if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') jobType = parts[1].trim();
-        } else if (cleanLine.includes('กำหนดส่งมอบ')) {
-            const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') dueDate = parts[1].trim();
-        } else if (cleanLine.includes('เลขjob')) {
-            const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== 'ยังไม่มี') jobNumber = parts[1].trim();
         } else if (cleanLine.includes('รายละเอียดงาน')) {
             const parts = cleanLine.split(':');
             if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') jobDetails = parts[1].trim();
         }
     }
 
-    return { companyName, customerName, jobType, dueDate, jobNumber, jobDetails };
+    return { companyName, customerName, jobType, jobDetails };
 }
 
 const client = new Client({
@@ -133,32 +108,16 @@ client.on('messageCreate', async message => {
     if (message.channel.isThread()) {
         const threadId = message.channel.id;
         
-        let messagePayload = {
-            content: message.content || "",
-            images: []
-        };
-
-        if (message.attachments.size > 0) {
-            for (const attachment of message.attachments.values()) {
-                if (attachment.contentType && attachment.contentType.startsWith('image/')) {
-                    const imagePart = await urlToGenerativePart(attachment.url, attachment.contentType);
-                    if (imagePart) {
-                        messagePayload.images.push(imagePart);
-                    }
-                }
-            }
-        }
-        
         let postData = postDataMap.get(threadId);
         if (!postData) {
             postData = {
                 ownerId: message.author.id,
-                contents: [messagePayload],
+                contents: [message.content],
                 botMessage: null,
                 isConfirmed: false,
+                summaryMessage: null,
                 currentSummary: null,
                 pendingUpdateContent: null,
-                pendingUpdateImages: [],
                 updateBotMessage: null
             };
             postDataMap.set(threadId, postData);
@@ -175,10 +134,10 @@ client.on('messageCreate', async message => {
                 components: [row]
             });
         } else {
+            // เช็คว่าเป็นเจ้าของโพสต์หรือไม่ ถึงจะนำข้อความมาเก็บ
             if (message.author.id === postData.ownerId) {
                 if (postData.isConfirmed) {
-                    postData.pendingUpdateContent = messagePayload.content;
-                    postData.pendingUpdateImages = messagePayload.images;
+                    postData.pendingUpdateContent = message.content;
 
                     const updateRow = new ActionRowBuilder().addComponents(
                         new ButtonBuilder()
@@ -192,11 +151,11 @@ client.on('messageCreate', async message => {
                     }
 
                     postData.updateBotMessage = await message.reply({
-                        content: `📝 **ตรวจพบข้อความ/รูปภาพเพิ่มเติม** ต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
+                        content: `📝 **ตรวจพบข้อความเพิ่มเติม:** "${message.content}"\nต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
                         components: [updateRow]
                     });
                 } else {
-                    postData.contents.push(messagePayload);
+                    postData.contents.push(message.content);
                 }
             }
         }
@@ -216,12 +175,9 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    const isOwner = interaction.user.id === postData.ownerId;
-    const hasSummaryRole = interaction.member && interaction.member.roles.cache.some(role => role.name.toLowerCase() === 'summary');
-
-    if (!isOwner && !hasSummaryRole) {
+    if (interaction.user.id !== postData.ownerId) {
         return interaction.reply({ 
-            content: '❌ เฉพาะเจ้าของโพสต์ หรือผู้ที่มีมีสิทธิ์กดปุ่มนี้ครับ', 
+            content: '❌ เฉพาะเจ้าของโพสต์เท่านั้นที่มีสิทธิ์กดปุ่มนี้ครับ', 
             ephemeral: true 
         });
     }
@@ -229,51 +185,35 @@ client.on('interactionCreate', async interaction => {
     // 1. กดปุ่มยืนยันสรุปงานครั้งแรก
     if (interaction.customId === 'confirm_summary') {
         await interaction.update({
-            content: `⏳ **กำลังประมวลผลข้อมูลและรูปภาพด้วย AI...**`,
+            content: `⏳ **กำลังประมวลผลข้อมูลด้วย AI...**`,
             components: []
         });
 
-        const textContents = postData.contents.map(c => c.content).filter(Boolean).join('\n');
-        const allImages = postData.contents.flatMap(c => c.images);
+        const fullContent = postData.contents.join('\n');
 
         try {
-            const prompt = `วิเคราะห์โพสต์งานโรงกลึงจากข้อความและรูปภาพที่แนบมานี้: "${textContents}"
-
-กฎการอ่านภาพแชท LINE เคร่งครัด:
-1. หากเป็นภาพแคปหน้าจอแชท LINE ให้แกะและอ่าน **เฉพาะข้อความตัวอักษร (Text)** ที่คุยกันในแชทเท่านั้น
-​2. **ห้ามบรรยาย อธิบาย หรือสรุปรายละเอียดเกี่ยวกับรูปถ่ายชิ้นงาน** ให้ข้ามรูปชิ้นงานไปเลย
-3. **ตรวจสอบตัวอักษรภาษาอังกฤษให้เป๊ะ:** เช่น "ib120" หรือ "ib130" ห้ามอ่านตกตัว "i" เป็น "b120"
-
-เงื่อนไขการคัดแยกและระบุรูปแบบข้อมูล:
-1. ชื่อบริษัทลูกค้า: มักเป็นชื่อย่อหรือชื่อโรงงาน/โซนพื้นที่ต่างๆ ให้ตรวจจับและระบุเลขสาขาหรือโซนติดมาด้วยเสมอ โดยรองรับรูปแบบการเขียนทุกประเภท ดังนี้:
-   - SYS: รองรับ SYS, SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
-   - GC: รองรับตั้งแต่ GC,GC1 ถึง 19 เช่น GC1 ถึง GC19, GC 1 ถึง GC 19, GC-1 ถึง GC-19, PTT GC-1 ถึง PTT GC-19
-   - GGC: รองรับ GGC, GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
-   - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
-2. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ"
-3. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
-4. กำหนดส่งมอบ: หากในข้อความหรือรูปแชทมีระบุวันส่งหรือคำบอกเวลา เช่น "เอาพรุ่งนี้", "ส่งวันศุกร์", หรือระบุวันที่ ให้ดึงมาตอบที่นี่ แต่ถ้าไม่มีให้ตอบว่า "ไม่ระบุ" ถ้ามีงานมากกว่า 1 อย่าง ให้ระบุรายละเอียด งานนั้นคู่กับวันที่ส่งมาด้วย
-5. เลขjob: ระบุเลขที่ใบงาน หากไม่พบตอบว่า "ยังไม่มี"
-6. รายละเอียดงาน: **บังคับต้องรวบรวมชื่อชิ้นงานและสเปกทั้งหมด** (เช่น "ib120, ib130 และ support 12 ชิ้น") มาใส่ไว้ที่ช่องนี้เสมอ ห้ามปล่อยว่างเด็ดขาด!
+            const prompt = `วิเคราะห์โพสต์งานโรงกลึงนี้: "${fullContent}"
+วิเคราะห์และดึงข้อมูลตามเงื่อนไขนี้อย่างเคร่งครัด:
+1. ชื่อบริษัทลูกค้า: หากไม่มีการระบุชื่อบริษัทหรือตัวย่อในข้อความ ให้ตอบว่า "ไม่ระบุ"
+3. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" แต่ถ้าไม่ได้ระบุประเภทงานมา ให้ตอบว่า "ไม่ระบุ"
+4. รายละเอียดงาน: หากไม่มีรายละเอียดงาน ให้ตอบว่า "ไม่ระบุ" (หากมีคำว่าตามตัวอย่าง ให้ระบุตามนั้น)
+5. ชื่อบริษัทลูกค้า: มักเป็นตัวย่อ/ชื่อย่อ (เช่น CGS, GCME, OSC, COA, GME, GCM, GGC PTT LNG, PTTGC, GC, RMS, SAP, SCG, SRI, SYS, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS)
+6. ชื่อลูกค้า: มักจะมีคำว่า "k.", "คุณ", หรือชื่อบุคคลต่อท้ายชื่อบริษัท (เช่น k.สาคร, คุณสาคร, ช่างสาคร) ห้ามสับสนกับชื่อบริษัท หากไม่มีการระบุชื่อบุคคล ในข้อความ ให้ตอบว่า "ไม่ระบุ"
+7. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" แต่ถ้าในข้อความไม่ได้ระบุประเภทงานมาเลย ให้ตอบว่า "ไม่ระบุ"
+8. รายละเอียดงาน: หากมีคำว่า "ตามตัวอย่าง", "ตาม ตย.", "ตามรูป", "ตามไฟล์แนบ" ให้สรุปว่าอ้างอิงรายละเอียดตามรูปภาพตัวอย่างที่แนบมาด้วย
 
 จัดรูปแบบการตอบดังนี้:
-- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท หรือ ไม่ระบุ]
+- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท/ชื่อย่อ หรือ ไม่ระบุ]
 - ชื่อลูกค้า: [ระบุชื่อลูกค้า หรือ ไม่ระบุ]
 - ประเภทงาน: [ทำใหม่, แก้ไข, หรือ ไม่ระบุ]
-- กำหนดส่งมอบ: [ระบุวันส่งมอบ หรือ ไม่ระบุ]
-- เลขjob: [ระบุเลขjob หรือ ยังไม่มี]
-- รายละเอียดงาน: [ระบุชื่อชิ้นงานและสเปกทั้งหมดที่พบ ห้ามว่าง]`;
+- รายละเอียดงาน: [ระบุรายละเอียดงาน หรือ ไม่ระบุ]`;
 
-            const aiResponse = await callGeminiWithFallback(prompt, allImages);
-            const parsed = parseAiResponse(aiResponse, textContents);
+            const aiResponse = await callGeminiWithFallback(prompt);
+            const parsed = parseAiResponse(aiResponse, fullContent);
 
             const employeeName = interaction.member ? interaction.member.displayName : interaction.user.username;
             const currentDate = new Date().toISOString().split('T')[0];
-            
-            let newThreadName = `${currentDate} - ${parsed.companyName !== "ไม่ระบุ" ? parsed.companyName : "งานใหม่"}`;
-            if (parsed.jobNumber !== "ยังไม่มี") {
-                newThreadName += ` - ${parsed.jobNumber}`;
-            }
+            const newThreadName = parsed.companyName !== "ไม่ระบุ" ? `${currentDate} - ${parsed.companyName}` : `${currentDate} - งานใหม่`;
 
             try {
                 await interaction.channel.setName(newThreadName);
@@ -289,19 +229,25 @@ client.on('interactionCreate', async interaction => {
                     { name: '👤 ชื่อลูกค้า', value: parsed.customerName, inline: false },
                     { name: '👨‍💻 ชื่อพนักงาน (ผู้บันทึก)', value: employeeName, inline: false },
                     { name: '📌 ประเภทงาน', value: parsed.jobType, inline: false },
-                    { name: '📅 กำหนดส่งมอบ', value: parsed.dueDate, inline: false },
-                    { name: '🔢 เลขjob', value: parsed.jobNumber, inline: false },
                     { name: '⚙️ รายละเอียดงาน', value: parsed.jobDetails, inline: false }
                 )
                 .setTimestamp();
 
-            await interaction.channel.send({ embeds: [summaryEmbed] });
+            // 1. ส่งการ์ดสรุปอันใหม่ลงไปก่อน
+            const summaryEmbedMsg = await interaction.channel.send({ embeds: [summaryEmbed] });
 
+            // 2. ค่อยลบการ์ดสรุปอันเก่าทิ้ง (ถ้ามี)
+            if (postData.summaryMessage) {
+                await postData.summaryMessage.delete().catch(() => {});
+            }
+
+            // ลบข้อความปุ่มกดเริ่มต้น
             if (postData.botMessage) {
                 await postData.botMessage.delete().catch(() => {});
             }
 
             postData.isConfirmed = true;
+            postData.summaryMessage = summaryEmbedMsg;
             postData.currentSummary = parsed;
 
         } catch (err) {
@@ -327,74 +273,33 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม (ดึงข้อมูลจาก Embed สรุปอันล่าสุดในแชทมาแก้ไขเพิ่มเติม)
+    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม
     if (interaction.customId === 'confirm_update') {
         await interaction.update({
-            content: `⏳ **กำลังดึงข้อมูลสรุปอันล่าสุดมาอัปเดตด้วย AI...**`,
+            content: `⏳ **กำลังอัปเดตสรุปข้อมูลด้วย AI...**`,
             components: []
         });
 
         try {
-            let latestSummaryData = {
-                companyName: "ไม่ระบุ",
-                customerName: "ไม่ระบุ",
-                jobType: "ไม่ระบุ",
-                dueDate: "ไม่ระบุ",
-                jobNumber: "ยังไม่มี",
-                jobDetails: "ไม่ระบุ"
-            };
+            const updatePrompt = `ข้อมูลสรุปเดิม:
+- ชื่อบริษัทลูกค้า: ${postData.currentSummary.companyName}
+- ชื่อลูกค้า: ${postData.currentSummary.customerName}
+- ประเภทงาน: ${postData.currentSummary.jobType}
+- รายละเอียดงาน: ${postData.currentSummary.jobDetails}
 
-            const messages = await interaction.channel.messages.fetch({ limit: 20 });
-            for (const msg of messages.values()) {
-                if (msg.author.id === client.user.id && msg.embeds.length > 0) {
-                    const embed = msg.embeds[0];
-                    if (embed.title && embed.title.includes('สรุปข้อมูลงาน')) {
-                        for (const field of embed.fields) {
-                            if (field.name.includes('ชื่อบริษัทลูกค้า')) latestSummaryData.companyName = field.value;
-                            if (field.name.includes('ชื่อลูกค้า')) latestSummaryData.customerName = field.value;
-                            if (field.name.includes('ประเภทงาน')) latestSummaryData.jobType = field.value;
-                            if (field.name.includes('กำหนดส่งมอบ')) latestSummaryData.dueDate = field.value;
-                            if (field.name.includes('เลขjob')) latestSummaryData.jobNumber = field.value;
-                            if (field.name.includes('รายละเอียดงาน')) latestSummaryData.jobDetails = field.value;
-                        }
-                        break;
-                    }
-                }
-            }
+ข้อความแก้ไขหรือเพิ่มติมที่ส่งมาใหม่: "${postData.pendingUpdateContent}"
 
-            const allTextCombined = `ข้อมูลจากสรุปอันล่าสุดในแชท (ใช้เป็นฐานข้อมูลหลัก ห้ามทำให้ข้อมูลเหล่านี้หายเด็ดขาด):
-- ชื่อบริษัทลูกค้าเดิม: ${latestSummaryData.companyName}
-- ชื่อลูกค้าเดิม: ${latestSummaryData.customerName}
-- ประเภทงานเดิม: ${latestSummaryData.jobType}
-- กำหนดส่งมอบเดิม: ${latestSummaryData.dueDate}
-- เลขjob เดิม: ${latestSummaryData.jobNumber}
-- รายละเอียดงานเดิม: ${latestSummaryData.jobDetails}
+จงอัปเดตข้อมูลทั้งหมดให้สอดคล้องกับข้อความใหม่ โดยคงค่าเดิมไว้หากไม่มีการพูดถึงการเปลี่ยนแปลง หากข้อมูลส่วนไหนไม่มีการระบุ ให้ตอบว่า "ไม่ระบุ" และจัดรูปแบบการตอบดังนี้:
+- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท/ชื่อย่อ หรือ ไม่ระบุ]
+- ชื่อลูกค้า: [ระบุชื่อลูกค้า หรือ ไม่ระบุ]
+- ประเภทงาน: [ทำใหม่, แก้ไข, หรือ ไม่ระบุ]
+- รายละเอียดงาน: [ระบุรายละเอียดงาน หรือ ไม่ระบุ]`;
 
-ข้อความหรือข้อมูลใหม่ที่พนักงานพิมพ์เพิ่มเข้ามาเพื่อแก้ไข/เพิ่มเติม: "${postData.pendingUpdateContent}"`;
-
-            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมดเพื่อแก้ไขและอัปเดตสรุปงานโดยผสานข้อมูลเก่าและข้อมูลใหม่เข้าด้วยกัน:
-1. นำข้อมูลจากสรุปอันล่าสุดมาเป็นหลัก หากข้อมูลใหม่เป็นการเพิ่มข้อความหรือแก้ไขเฉพาะจุด ให้ปรับแก้เฉพาะจุดนั้น ส่วนข้อมูลเดิมที่ยังถูกต้องให้คงไว้ ห้ามเปลี่ยนเป็น "ไม่ระบุ"
-2. ประเภทงาน: ระบุประเภทงานเดิมหรืออัปเดต
-3. กำหนดส่งมอบ: ระบุวันส่งมอบเดิมหรืออัปเดต
-4. เลขjob: อัปเดตเลข Job ใหม่หรือคงค่าเดิม
-5. รายละเอียดงาน: นำรายละเอียดงานเดิมมาผสานหรือต่อท้ายด้วยข้อมูลใหม่ ห้ามปล่อยว่างและห้ามทิ้งของเดิม
-
-จัดรูปแบบการตอบดังนี้:
-- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัทเดิมหรือที่แก้ไขใหม่]
-- ชื่อลูกค้า: [ระบุชื่อลูกค้าเดิมหรือที่แก้ไขใหม่]
-- ประเภทงาน: [ระบุประเภทงานเดิมหรือที่แก้ไขใหม่]
-- กำหนดส่งมอบ: [ระบุวันส่งมอบเดิมหรือที่แก้ไขใหม่]
-- เลขjob: [ระบุเลขjob เดิมหรือที่แก้ไขใหม่]
-- รายละเอียดงาน: [ระบุรายละเอียดงานเดิมและใหม่รวมกัน ห้ามว่าง]`;
-
-            const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
-            const parsed = parseAiResponse(aiResponse, latestSummaryData.jobDetails);
+            const aiResponse = await callGeminiWithFallback(updatePrompt);
+            const parsed = parseAiResponse(aiResponse, postData.currentSummary.jobDetails);
 
             const currentDate = new Date().toISOString().split('T')[0];
-            let newThreadName = `${currentDate} - ${parsed.companyName !== "ไม่ระบุ" ? parsed.companyName : "งานอัปเดต"}`;
-            if (parsed.jobNumber !== "ยังไม่มี") {
-                newThreadName += ` - ${parsed.jobNumber}`;
-            }
+            const newThreadName = parsed.companyName !== "ไม่ระบุ" ? `${currentDate} - ${parsed.companyName}` : `${currentDate} - งานอัปเดต`;
 
             try {
                 await interaction.channel.setName(newThreadName);
@@ -405,28 +310,33 @@ client.on('interactionCreate', async interaction => {
             const employeeName = interaction.member ? interaction.member.displayName : interaction.user.username;
 
             const updatedEmbed = new EmbedBuilder()
-                .setTitle('📋 สรุปข้อมูลงาน (อัปเดต)')
+                .setTitle('📋 สรุปข้อมูลงาน')
                 .setColor(0x00FF00)
                 .addFields(
                     { name: '🏢 ชื่อบริษัทลูกค้า', value: parsed.companyName, inline: false },
                     { name: '👤 ชื่อลูกค้า', value: parsed.customerName, inline: false },
                     { name: '👨‍💻 ชื่อพนักงาน (ผู้บันทึก)', value: employeeName, inline: false },
                     { name: '📌 ประเภทงาน', value: parsed.jobType, inline: false },
-                    { name: '📅 กำหนดส่งมอบ', value: parsed.dueDate, inline: false },
-                    { name: '🔢 เลขjob', value: parsed.jobNumber, inline: false },
                     { name: '⚙️ รายละเอียดงาน', value: parsed.jobDetails, inline: false }
                 )
                 .setTimestamp();
 
-            await interaction.channel.send({ embeds: [updatedEmbed] });
+            // 1. ส่งการ์ดสรุปอันใหม่ลงไปก่อน
+            const newSummaryMsg = await interaction.channel.send({ embeds: [updatedEmbed] });
 
+            // 2. ค่อยลบการ์ดสรุปอันเก่าทิ้ง
+            if (postData.summaryMessage) {
+                await postData.summaryMessage.delete().catch(() => {});
+            }
+
+            // ลบข้อความปุ่มอัปเดตทิ้ง
             if (postData.updateBotMessage) {
                 await postData.updateBotMessage.delete().catch(() => {});
             }
 
+            postData.summaryMessage = newSummaryMsg;
             postData.currentSummary = parsed;
             postData.pendingUpdateContent = null;
-            postData.pendingUpdateImages = [];
 
         } catch (err) {
             console.error("Update Error:", err);
