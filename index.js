@@ -89,38 +89,24 @@ function parseAiResponse(aiResponse, fallbackDetails) {
     const lines = aiResponse.split('\n');
     for (const line of lines) {
         const cleanLine = line.replace(/[*_`]/g, '').trim();
-        
-        // ใช้การเช็คคำเริ่มต้นและดึงข้อความหลังเครื่องหมาย colon (:) แบบยืดหยุ่น
         if (cleanLine.includes('ชื่อบริษัทลูกค้า')) {
             const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== '[ระบุชื่อบริษัทเดิมหรือที่แก้ไขใหม่]') {
-                companyName = parts[1].trim();
-            }
+            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') companyName = parts[1].trim();
         } else if (cleanLine.includes('ชื่อลูกค้า')) {
             const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== '[ระบุชื่อลูกค้าเดิมหรือที่แก้ไขใหม่]') {
-                customerName = parts[1].trim();
-            }
+            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') customerName = parts[1].trim();
         } else if (cleanLine.includes('ประเภทงาน')) {
             const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== '[ระบุประเภทงานเดิมหรือที่แก้ไขใหม่]') {
-                jobType = parts[1].trim();
-            }
+            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') jobType = parts[1].trim();
         } else if (cleanLine.includes('กำหนดส่งมอบ')) {
             const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== '[ระบุวันส่งมอบเดิมหรือที่แก้ไขใหม่]') {
-                dueDate = parts[1].trim();
-            }
+            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') dueDate = parts[1].trim();
         } else if (cleanLine.includes('เลขjob')) {
             const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== 'ยังไม่มี' && parts[1].trim() !== '[ระบุเลขjob เดิมหรือที่แก้ไขใหม่]') {
-                jobNumber = parts[1].trim();
-            }
+            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== 'ยังไม่มี') jobNumber = parts[1].trim();
         } else if (cleanLine.includes('รายละเอียดงาน')) {
             const parts = cleanLine.split(':');
-            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-' && parts[1].trim() !== '[ระบุรายละเอียดงานเดิมและใหม่รวมกัน ห้ามว่าง]') {
-                jobDetails = parts[1].trim();
-            }
+            if (parts[1] && parts[1].trim() && parts[1].trim() !== '-') jobDetails = parts[1].trim();
         }
     }
 
@@ -255,7 +241,7 @@ client.on('interactionCreate', async interaction => {
 
 กฎการอ่านภาพแชท LINE เคร่งครัด:
 1. หากเป็นภาพแคปหน้าจอแชท LINE ให้แกะและอ่าน **เฉพาะข้อความตัวอักษร (Text)** ที่คุยกันในแชทเท่านั้น
-​2. **ห้ามบรรยาย อธิบาย หรือสรุปรายละเอียดเกี่ยวกับรูปถ่ายชิ้นงาน** ให้ข้ามรูปชิ้นงานไปเลย
+2. **ห้ามบรรยาย อธิบาย หรือสรุปรายละเอียดเกี่ยวกับรูปถ่ายชิ้นงาน** ให้ข้ามรูปชิ้นงานไปเลย
 3. **ตรวจสอบตัวอักษรภาษาอังกฤษให้เป๊ะ:** เช่น "ib120" หรือ "ib130" ห้ามอ่านตกตัว "i" เป็น "b120"
 
 เงื่อนไขการคัดแยกและระบุรูปแบบข้อมูล:
@@ -341,68 +327,34 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม (ดึงข้อมูลจาก Embed สรุปอันล่าสุดในแชทมาแก้ไขเพิ่มเติม)
+    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม
     if (interaction.customId === 'confirm_update') {
         await interaction.update({
-            content: `⏳ **กำลังดึงข้อมูลสรุปอันล่าสุดมาอัปเดตด้วย AI...**`,
+            content: `⏳ **กำลังอัปเดตสรุปข้อมูลด้วย AI...**`,
             components: []
         });
 
         try {
-            let latestSummaryData = {
-                companyName: "ไม่ระบุ",
-                customerName: "ไม่ระบุ",
-                jobType: "ไม่ระบุ",
-                dueDate: "ไม่ระบุ",
-                jobNumber: "ยังไม่มี",
-                jobDetails: "ไม่ระบุ"
-            };
+            const allTextCombined = `ข้อมูลเดิม:\n- ชื่อบริษัทลูกค้า: ${postData.currentSummary.companyName}\n- ชื่อลูกค้าเดิม: ${postData.currentSummary.customerName}\n- ประเภทงาน: ${postData.currentSummary.jobType}\n- กำหนดส่งมอบเดิม: ${postData.currentSummary.dueDate}\n- เลขjob: ${postData.currentSummary.jobNumber}\n- รายละเอียดงาน: ${postData.currentSummary.jobDetails}\n\nข้อความหรือข้อมูลใหม่ที่พนักงานพิมพ์เพิ่มเข้ามาในเธรด: "${postData.pendingUpdateContent}"`;
 
-            const messages = await interaction.channel.messages.fetch({ limit: 20 });
-            for (const msg of messages.values()) {
-                if (msg.author.id === client.user.id && msg.embeds.length > 0) {
-                    const embed = msg.embeds[0];
-                    if (embed.title && embed.title.includes('สรุปข้อมูลงาน')) {
-                        for (const field of embed.fields) {
-                            if (field.name.includes('ชื่อบริษัทลูกค้า')) latestSummaryData.companyName = field.value;
-                            if (field.name.includes('ชื่อลูกค้า')) latestSummaryData.customerName = field.value;
-                            if (field.name.includes('ประเภทงาน')) latestSummaryData.jobType = field.value;
-                            if (field.name.includes('กำหนดส่งมอบ')) latestSummaryData.dueDate = field.value;
-                            if (field.name.includes('เลขjob')) latestSummaryData.jobNumber = field.value;
-                            if (field.name.includes('รายละเอียดงาน')) latestSummaryData.jobDetails = field.value;
-                        }
-                        break;
-                    }
-                }
-            }
+            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมดเพื่ออัปเดตสรุปงาน:
+${allTextCombined}
 
-            const allTextCombined = `ข้อมูลจากสรุปอันล่าสุดในแชท (ใช้เป็นฐานข้อมูลหลัก ห้ามทำให้ข้อมูลเหล่านี้หายเด็ดขาด):
-- ชื่อบริษัทลูกค้าเดิม: ${latestSummaryData.companyName}
-- ชื่อลูกค้าเดิม: ${latestSummaryData.customerName}
-- ประเภทงานเดิม: ${latestSummaryData.jobType}
-- กำหนดส่งมอบเดิม: ${latestSummaryData.dueDate}
-- เลขjob เดิม: ${latestSummaryData.jobNumber}
-- รายละเอียดงานเดิม: ${latestSummaryData.jobDetails}
-
-ข้อความหรือข้อมูลใหม่ที่พนักงานพิมพ์เพิ่มเข้ามาเพื่อแก้ไข/เพิ่มเติม: "${postData.pendingUpdateContent}"`;
-
-            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมดเพื่อแก้ไขและอัปเดตสรุปงานโดยผสานข้อมูลเก่าและข้อมูลใหม่เข้าด้วยกัน:
-1. นำข้อมูลจากสรุปอันล่าสุดมาเป็นหลัก หากข้อมูลใหม่เป็นการเพิ่มข้อความหรือแก้ไขเฉพาะจุด ให้ปรับแก้เฉพาะจุดนั้น ส่วนข้อมูลเดิมที่ยังถูกต้องให้คงไว้ ห้ามเปลี่ยนเป็น "ไม่ระบุ"
-2. ประเภทงาน: ระบุประเภทงานเดิมหรืออัปเดต
-3. กำหนดส่งมอบ: ระบุวันส่งมอบเดิมหรืออัปเดต
-4. เลขjob: อัปเดตเลข Job ใหม่หรือคงค่าเดิม
-5. รายละเอียดงาน: นำรายละเอียดงานเดิมมาผสานหรือต่อท้ายด้วยข้อมูลใหม่ ห้ามปล่อยว่างและห้ามทิ้งของเดิม
-
+กฎการอัปเดต:
+1. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
+2. กำหนดส่งมอบ: หากในข้อความหรือรูปแชทมีระบุวันส่งหรือคำบอกเวลา เช่น "เอาพรุ่งนี้", "ส่งวันศุกร์", หรือระบุวันที่ ให้ดึงมาตอบที่นี่ แต่ถ้าไม่มีให้ตอบว่า "ไม่ระบุ" ถ้ามีงานมากกว่า 1 อย่าง ให้ระบุรายละเอียด งานนั้นคู่กับวันที่ส่งมาด้วย
+3. รายละเอียดงาน: **บังคับต้องรวบรวมชื่อชิ้นงานและสเปกทั้งหมด** มาไว้ที่ช่องนี้เสมอ ห้ามปล่อยว่าง
+4. คงค่าเดิมไว้หากไม่มีการเปลี่ยนแปลง หากส่วนไหนไม่มีการระบุ ให้ตอบว่า "ไม่ระบุ" (เฉพาะเลขjob ถ้าไม่มีให้ตอบว่า "ยังไม่มี")
 จัดรูปแบบการตอบดังนี้:
-- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัทเดิมหรือที่แก้ไขใหม่]
-- ชื่อลูกค้า: [ระบุชื่อลูกค้าเดิมหรือที่แก้ไขใหม่]
-- ประเภทงาน: [ระบุประเภทงานเดิมหรือที่แก้ไขใหม่]
-- กำหนดส่งมอบ: [ระบุวันส่งมอบเดิมหรือที่แก้ไขใหม่]
-- เลขjob: [ระบุเลขjob เดิมหรือที่แก้ไขใหม่]
-- รายละเอียดงาน: [ระบุรายละเอียดงานเดิมและใหม่รวมกัน ห้ามว่าง]`;
+- ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท หรือ ไม่ระบุ]
+- ชื่อลูกค้า: [ระบุชื่อลูกค้า หรือ ไม่ระบุ]
+- ประเภทงาน: [ระบุชิ้นงานคู่กับประเภทงาน]
+- กำหนดส่งมอบ: [ระบุชิ้นงานคู่กับวันส่งมอบ]
+- เลขjob: [ระบุเลขjob หรือ ยังไม่มี]
+- รายละเอียดงาน: [ระบุชื่อชิ้นงานและสเปกทั้งหมดที่พบ ห้ามว่าง]`;
 
             const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
-            const parsed = parseAiResponse(aiResponse, latestSummaryData.jobDetails);
+            const parsed = parseAiResponse(aiResponse, postData.currentSummary.jobDetails);
 
             const currentDate = new Date().toISOString().split('T')[0];
             let newThreadName = `${currentDate} - ${parsed.companyName !== "ไม่ระบุ" ? parsed.companyName : "งานอัปเดต"}`;
