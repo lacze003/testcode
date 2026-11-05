@@ -246,9 +246,9 @@ client.on('interactionCreate', async interaction => {
 
 เงื่อนไขการคัดแยกและระบุรูปแบบข้อมูล:
 1. ชื่อบริษัทลูกค้า: มักเป็นชื่อย่อหรือชื่อโรงงาน/โซนพื้นที่ต่างๆ ให้ตรวจจับและระบุเลขสาขาหรือโซนติดมาด้วยเสมอ โดยรองรับรูปแบบการเขียนทุกประเภท ดังนี้:
-   - SYS: รองรับ SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
-   - GC: รองรับตั้งแต่ 1 ถึง 19 เช่น GC1 ถึง GC19, GC 1 ถึง GC 19, GC-1 ถึง GC-19, PTT GC-1 ถึง PTT GC-19
-   - GGC: รองรับ GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
+   - SYS: รองรับ SYS, SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
+   - GC: รองรับตั้งแต่ GC,GC1 ถึง 19 เช่น GC1 ถึง GC19, GC 1 ถึง GC 19, GC-1 ถึง GC-19, PTT GC-1 ถึง PTT GC-19
+   - GGC: รองรับ GGC, GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
    - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
 2. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ"
 3. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
