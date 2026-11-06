@@ -89,70 +89,63 @@ client.on('messageCreate', async message => {
             });
         }
 
-        // ตรวจสอบการส่งไฟล์ และรวมยอดจำนวนไฟล์ในเธรดแบบสะสมอัตโนมัติ
-if (message.attachments.size > 0) {
-    try {
-        // ดึงข้อความล่าสุดในเธรดมาตรวจสอบ
-        const fetchedMsgs = await message.channel.messages.fetch({ limit: 20 });
-        let existingAlertMsg = null;
-        let currentTotalFiles = message.attachments.size;
-        let currentPdfCount = 0;
+        // ตรวจสอบการส่งไฟล์ และรวมยอดจำนวนไฟล์ในเธรดแบบดึงข้อความจริงมาบวกสะสม
+        if (message.attachments.size > 0) {
+            try {
+                // ดึงประวัติข้อความล่าสุดในเธรดมาเช็ค
+                const fetchedMsgs = await message.channel.messages.fetch({ limit: 30 });
+                let existingAlertMsg = null;
+                let currentTotalFiles = message.attachments.size;
+                let currentPdfCount = 0;
 
-        // เช็คจำนวน PDF ในข้อความที่เพิ่งส่งมา
-        for (const att of message.attachments.values()) {
-            const url = att.url.toLowerCase();
-            const contentType = (att.contentType || "").toLowerCase();
-            if (url.endsWith('.pdf') || contentType.includes('pdf')) {
-                currentPdfCount++;
-            }
-        }
-
-        // ค้นหาข้อความแจ้งเตือนไฟล์อันเก่าของบอทในเธรดนี้
-        for (const m of fetchedMsgs.values()) {
-            // เช็คว่าเป็นข้อความของบอท และมีคำว่า "แจ้งเตือนจากระบบ"
-            if (m.author.id === client.user.id && m.content.includes('แจ้งเตือนจากระบบ:')) {
-                existingAlertMsg = m;
-                
-                // ดึงจำนวนไฟล์รวมเก่าจากข้อความเดิม
-                const matchTotal = m.content.match(/รวมทั้งหมด (\d+) ไฟล์/);
-                if (matchTotal) {
-                    currentTotalFiles += parseInt(matchTotal[1], 10);
-                } else {
-                    // เผื่อกรณีข้อความเก่าเป็นแบบบรรทัดเดียว
-                    const matchSingle = m.content.match(/มา (\d+) ไฟล์/);
-                    if (matchSingle) {
-                        currentTotalFiles += parseInt(matchSingle[1], 10);
+                // เช็คจำนวน PDF ในข้อความปัจจุบันที่เพิ่งส่ง
+                for (const att of message.attachments.values()) {
+                    const url = att.url.toLowerCase();
+                    const contentType = (att.contentType || "").toLowerCase();
+                    if (url.endsWith('.pdf') || contentType.includes('pdf')) {
+                        currentPdfCount++;
                     }
                 }
 
-                // ดึงจำนวน PDF เก่ามาบวกเพิ่ม (ถ้ามี)
-                const matchPdf = m.content.match(/ตัว PDF มา (\d+) ไฟล์/);
-                if (matchPdf) {
-                    currentPdfCount += parseInt(matchPdf[1], 10);
+                // ค้นหาข้อความแจ้งเตือนไฟล์ล่าสุดของบอทในแชท
+                for (const m of fetchedMsgs.values()) {
+                    if (m.author.id === client.user.id && m.content.includes('แจ้งเตือนจากระบบ:')) {
+                        existingAlertMsg = m;
+                        
+                        // ดึงตัวเลขยอดรวมเก่าจากข้อความเดิม (รองรับทั้งแบบรวมทั้งหมด และแบบตัวเลขเดี่ยว)
+                        const matchTotal = m.content.match(/รวมทั้งหมด (\d+) ไฟล์/) || m.content.match(/มา (\d+) ไฟล์/);
+                        if (matchTotal) {
+                            currentTotalFiles += parseInt(matchTotal[1], 10);
+                        }
+
+                        // ดึงจำนวน PDF เก่ามาบวกเพิ่ม (ถ้ามี)
+                        const matchPdf = m.content.match(/ตัว PDF มา (\d+) ไฟล์/);
+                        if (matchPdf) {
+                            currentPdfCount += parseInt(matchPdf[1], 10);
+                        }
+                        break; // เจอข้อความแจ้งเตือนล่าสุดแล้ว หยุดหาทันที
+                    }
                 }
-                break; // เจออันล่าสุดแล้วหยุดหา
+
+                let alertText = `📎 **แจ้งเตือนจากระบบ**: มีการส่งไฟล์งานมา ${currentTotalFiles} ไฟล์ครับ`;
+                if (currentPdfCount > 0) {
+                    alertText = `📎 **แจ้งเตือนจากระบบ**: มีการส่งตัว PDF มา ${currentPdfCount} ไฟล์ครับ (รวมทั้งหมด ${currentTotalFiles} ไฟล์)`;
+                }
+
+                // ลบข้อความแจ้งเตือนอันเก่าทิ้งทันที
+                if (existingAlertMsg) {
+                    await existingAlertMsg.delete().catch(() => {});
+                }
+
+                // ส่งข้อความแจ้งเตือนยอดรวมใหม่ลงในเธรด
+                await message.channel.send({
+                    content: alertText
+                });
+
+            } catch (err) {
+                console.error("Error updating file count alert:", err);
             }
         }
-
-        let alertText = `📎 **แจ้งเตือนจากระบบ**: มีการส่งไฟล์งานมา ${currentTotalFiles} ไฟล์ครับ`;
-        if (currentPdfCount > 0) {
-            alertText = `📎 **แจ้งเตือนจากระบบ**: มีการส่งตัว PDF มา ${currentPdfCount} ไฟล์ครับ (รวมทั้งหมด ${currentTotalFiles} ไฟล์)`;
-        }
-
-        // ถ้าเจอข้อความแจ้งเตือนอันเก่า ให้ลบทิ้งทันทีก่อนส่งอันใหม่
-        if (existingAlertMsg) {
-            await existingAlertMsg.delete().catch(() => {});
-        }
-
-        // ส่งข้อความแจ้งเตือนยอดรวมใหม่ล่าสุด
-        await message.channel.send({
-            content: alertText
-        });
-
-    } catch (err) {
-        console.error("Error updating file count alert:", err);
-    }
-}
     }
 });
 
@@ -194,4 +187,5 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
+client.login(process.env.DISCORD_TOKEN);
 client.login(process.env.DISCORD_TOKEN);
