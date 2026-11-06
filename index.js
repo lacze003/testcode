@@ -45,7 +45,7 @@ client.on('messageCreate', async message => {
             threadOwnerMap.set(threadId, message.author.id);
         }
 
-        // [จุดเช็คใหม่] ตรวจสอบว่าในเธรดนี้เคยมีปุ่มกดของบอทส่งไปแล้วหรือยัง (ป้องกันปุ่มเด้งซ้ำอันที่สอง)
+        // ตรวจสอบว่าในเธรดนี้เคยมีปุ่มกดของบอทส่งไปแล้วหรือยัง (ป้องกันปุ่มเด้งซ้ำ)
         let hasButtonsAlready = false;
         try {
             const fetchedMsgs = await message.channel.messages.fetch({ limit: 20 });
@@ -59,7 +59,7 @@ client.on('messageCreate', async message => {
             console.error("Error checking existing buttons:", err);
         }
 
-        // ถ้ายังไม่เคยมีปุ่มในเธรดนี้ และไม่ใช่ข้อความของเจ้าของโพสต์ที่ส่งซ้ำ (หรือจะเป็นข้อความแรกก็ได้) ให้ส่งชุดปุ่มขึ้นมาครั้งเดียว
+        // ถ้ายังไม่เคยมีปุ่ม ให้ส่งชุดปุ่มขึ้นมาครั้งเดียว
         if (!hasButtonsAlready) {
             const askRow1 = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -75,11 +75,11 @@ client.on('messageCreate', async message => {
             const askRow2 = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('ask_company_bot2')
-                    .setLabel('❓ งานทำใหม่หรือแก้ไข ')
+                    .setLabel('❓ งานทำใหม่หรือแก้ไข')
                     .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId('ask_type_duedate_bot2')
-                    .setLabel('📌  กำหนดส่งวันไหน')
+                    .setLabel('📌 กำหนดส่งวันไหน')
                     .setStyle(ButtonStyle.Secondary)
             );
 
@@ -89,44 +89,61 @@ client.on('messageCreate', async message => {
             });
         }
 
-        // ตรวจสอบไฟล์แนบเฉพาะ PDF หรือเอกสาร (ไม่นับรูปภาพ)
+        // ตรวจสอบการส่งไฟล์ และรวมยอดจำนวนไฟล์ในเธรด
         if (message.attachments.size > 0) {
-            let hasDocument = false;
-            
-            for (const attachment of message.attachments.values()) {
-                const url = attachment.url.toLowerCase();
-                const contentType = (attachment.contentType || "").toLowerCase();
+            try {
+                const fetchedMsgs = await message.channel.messages.fetch({ limit: 50 });
+                let existingAlertMsg = null;
+                let currentTotalFiles = message.attachments.size;
+                let currentPdfCount = 0;
 
-                if (
-                    url.endsWith('.pdf') || 
-                    url.endsWith('.doc') || 
-                    url.endsWith('.docx') || 
-                    url.endsWith('.xls') || 
-                    url.endsWith('.xlsx') || 
-                    url.endsWith('.txt') || 
-                    url.endsWith('.csv') ||
-                    contentType.includes('pdf') ||
-                    contentType.includes('document') ||
-                    contentType.includes('sheet') ||
-                    contentType.includes('text')
-                ) {
-                    hasDocument = true;
-                    break;
+                // เช็คจำนวน PDF ในข้อความปัจจุบัน
+                for (const att of message.attachments.values()) {
+                    const url = att.url.toLowerCase();
+                    const contentType = (att.contentType || "").toLowerCase();
+                    if (url.endsWith('.pdf') || contentType.includes('pdf')) {
+                        currentPdfCount++;
+                    }
                 }
-            }
 
-            if (hasDocument) {
-                const ownerId = threadOwnerMap.get(threadId);
-                
-                if (ownerId && message.author.id !== ownerId) {
-                    await message.channel.send({
-                        content: `📎 **แจ้งเตือนจากระบบ**: มีการส่งไฟล์เอกสาร/PDF ใหม่เข้ามาในเธรดนี้ครับ <@${ownerId}>`
-                    });
-                } else if (!ownerId) {
-                    await message.channel.send({
-                        content: `📎 **แจ้งเตือนจากระบบ**: มีการส่งไฟล์เอกสาร/PDF ใหม่เข้ามาในเธรดนี้ครับ`
-                    });
+                // ค้นหาข้อความแจ้งเตือนไฟล์อันเก่าของบอทในเธรดนี้
+                for (const m of fetchedMsgs.values()) {
+                    if (m.author.id === client.user.id && m.content.includes('แจ้งเตือนจากระบบ: มีการส่งไฟล์งานมา')) {
+                        existingAlertMsg = m;
+                        
+                        // แกะรอยจำนวนไฟล์เก่าจากข้อความเดิม (เช่น "มีการส่งไฟล์งานมา X ไฟล์ครับ")
+                        const matchTotal = m.content.match(/มา (\d+) ไฟล์/);
+                        if (matchTotal) {
+                            currentTotalFiles += parseInt(matchTotal[1], 10);
+                        }
+
+                        // แกะรอยจำนวน PDF เก่า (ถ้ามี)
+                        const matchPdf = m.content.match(/ตัว PDF มา (\d+) ไฟล์/);
+                        if (matchPdf) {
+                            let oldPdf = parseInt(matchPdf[1], 10);
+                            currentPdfCount += oldPdf;
+                        }
+                        break;
+                    }
                 }
+
+                let alertText = `📎 **แจ้งเตือนจากระบบ**: มีการส่งไฟล์งานมา ${currentTotalFiles} ไฟล์ครับ`;
+                if (currentPdfCount > 0) {
+                    alertText = `📎 **แจ้งเตือนจากระบบ**: มีการส่งตัว PDF มา ${currentPdfCount} ไฟล์ครับ (รวมทั้งหมด ${currentTotalFiles} ไฟล์)`;
+                }
+
+                // ถ้ามีข้อความแจ้งเตือนอันเก่า ให้ลบทิ้งก่อน
+                if (existingAlertMsg) {
+                    await existingAlertMsg.delete().catch(() => {});
+                }
+
+                // ส่งข้อความแจ้งเตือนยอดใหม่ล่าสุด
+                await message.channel.send({
+                    content: alertText
+                });
+
+            } catch (err) {
+                console.error("Error updating file count alert:", err);
             }
         }
     }
@@ -158,7 +175,7 @@ client.on('interactionCreate', async interaction => {
         ephemeral: true 
     });
 
-    // ส่งข้อความแท็กเรียกเจ้าของโพสต์ในเธรดสาธารณะ
+    // ส่งข้อความแท็กเรียกเจ้าของโพสต์ในเธรดสาธารณะ (เมื่อมีการกดปุ่ม)
     if (ownerId) {
         await interaction.channel.send({
             content: `📢 <@${ownerId}> ${requestMessageText}`
