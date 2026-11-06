@@ -40,29 +40,46 @@ client.on('messageCreate', async message => {
     if (message.channel.isThread()) {
         const threadId = message.channel.id;
         
-        // ถ้าเป็นข้อความแรกในเธรด ให้บันทึกเจ้าของโพสต์และส่งชุดปุ่มสอบถาม
+        // บันทึกเจ้าของโพสต์ (ถ้ายังไม่มี)
         if (!threadOwnerMap.has(threadId)) {
             threadOwnerMap.set(threadId, message.author.id);
+        }
 
+        // [จุดเช็คใหม่] ตรวจสอบว่าในเธรดนี้เคยมีปุ่มกดของบอทส่งไปแล้วหรือยัง (ป้องกันปุ่มเด้งซ้ำอันที่สอง)
+        let hasButtonsAlready = false;
+        try {
+            const fetchedMsgs = await message.channel.messages.fetch({ limit: 20 });
+            for (const m of fetchedMsgs.values()) {
+                if (m.author.id === client.user.id && m.components && m.components.length > 0) {
+                    hasButtonsAlready = true;
+                    break;
+                }
+            }
+        } catch (err) {
+            console.error("Error checking existing buttons:", err);
+        }
+
+        // ถ้ายังไม่เคยมีปุ่มในเธรดนี้ และไม่ใช่ข้อความของเจ้าของโพสต์ที่ส่งซ้ำ (หรือจะเป็นข้อความแรกก็ได้) ให้ส่งชุดปุ่มขึ้นมาครั้งเดียว
+        if (!hasButtonsAlready) {
             const askRow1 = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('ask_job_details_bot2')
-                    .setLabel('📋 ขอรายละเอียดงาน')
+                    .setLabel('📋 ขอรายละเอียดข้อมูลที่ไม่ครบหน่อยครับ')
                     .setStyle(ButtonStyle.Primary),
                 new ButtonBuilder()
                     .setCustomId('ask_missing_info_bot2')
-                    .setLabel('❓ ขอรายละเอียดข้อมูลที่ไม่ครบหน่อยครับ')
+                    .setLabel('🏢 บริษัทอะไร')
                     .setStyle(ButtonStyle.Secondary)
             );
 
             const askRow2 = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('ask_company_bot2')
-                    .setLabel('🏢 บริษัทอะไร')
+                    .setLabel('❓ งานทำใหม่หรือแก้ไข ')
                     .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId('ask_type_duedate_bot2')
-                    .setLabel('📌 งานทำใหม่หรือแก้ไข / กำหนดส่งวันไหน')
+                    .setLabel('📌  กำหนดส่งวันไหน')
                     .setStyle(ButtonStyle.Secondary)
             );
 
@@ -80,7 +97,6 @@ client.on('messageCreate', async message => {
                 const url = attachment.url.toLowerCase();
                 const contentType = (attachment.contentType || "").toLowerCase();
 
-                // เช็คว่าเป็น PDF หรือไฟล์เอกสารทั่วไป (doc, docx, xls, xlsx, txt, pdf, etc.)
                 if (
                     url.endsWith('.pdf') || 
                     url.endsWith('.doc') || 
@@ -125,13 +141,13 @@ client.on('interactionCreate', async interaction => {
     let requestMessageText = '';
 
     if (interaction.customId === 'ask_job_details_bot2') {
-        requestMessageText = '**รบกวนพิมพ์รายละเอียดงานเพิ่มเติมให้หน่อยครับ**';
-    } else if (interaction.customId === 'ask_missing_info_bot2') {
         requestMessageText = '**ขอรายละเอียดข้อมูลที่ไม่ครบหน่อยครับ**';
+    } else if (interaction.customId === 'ask_missing_info_bot2') {
+        requestMessageText = '**เป็นงานของบริษัทอะไรครับ?**';
     } else if (interaction.customId === 'ask_company_bot2') {
-        requestMessageText = '**สอบถามครับ เป็นงานของบริษัทอะไรครับ?**';
+        requestMessageText = '**งานนี้เป็นงานทำใหม่หรือแก้ไขครับ?**';
     } else if (interaction.customId === 'ask_type_duedate_bot2') {
-        requestMessageText = '**สอบถามเพิ่มเติมครับ: งานนี้เป็นงานทำใหม่หรือแก้ไข และกำหนดส่งวันไหนครับ?**';
+        requestMessageText = '**กำหนดส่งวันไหนครับ?**';
     } else {
         return;
     }
