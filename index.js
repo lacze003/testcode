@@ -89,7 +89,7 @@ client.on('messageCreate', async message => {
             });
         }
 
-        // ตรวจสอบการส่งไฟล์ และรวมยอดจำนวนไฟล์ในเธรด
+        // ตรวจสอบการส่งไฟล์ และรวมยอดจำนวนไฟล์ในเธรดแบบสะสมอัตโนมัติ
         if (message.attachments.size > 0) {
             try {
                 const fetchedMsgs = await message.channel.messages.fetch({ limit: 50 });
@@ -111,13 +111,13 @@ client.on('messageCreate', async message => {
                     if (m.author.id === client.user.id && m.content.includes('แจ้งเตือนจากระบบ: มีการส่งไฟล์งานมา')) {
                         existingAlertMsg = m;
                         
-                        // แกะรอยจำนวนไฟล์เก่าจากข้อความเดิม (เช่น "มีการส่งไฟล์งานมา X ไฟล์ครับ")
+                        // ดึงจำนวนไฟล์เก่าจากข้อความเดิมมาบวกเพิ่ม
                         const matchTotal = m.content.match(/มา (\d+) ไฟล์/);
                         if (matchTotal) {
                             currentTotalFiles += parseInt(matchTotal[1], 10);
                         }
 
-                        // แกะรอยจำนวน PDF เก่า (ถ้ามี)
+                        // ดึงจำนวน PDF เก่ามาบวกเพิ่ม (ถ้ามี)
                         const matchPdf = m.content.match(/ตัว PDF มา (\d+) ไฟล์/);
                         if (matchPdf) {
                             let oldPdf = parseInt(matchPdf[1], 10);
@@ -137,7 +137,7 @@ client.on('messageCreate', async message => {
                     await existingAlertMsg.delete().catch(() => {});
                 }
 
-                // ส่งข้อความแจ้งเตือนยอดใหม่ล่าสุด
+                // ส่งข้อความแจ้งเตือนยอดรวมใหม่ล่าสุด
                 await message.channel.send({
                     content: alertText
                 });
