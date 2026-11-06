@@ -253,7 +253,7 @@ client.on('interactionCreate', async interaction => {
 เงื่อนไขการคัดแยกและระบุรูปแบบข้อมูล:
 1. ชื่อบริษัทลูกค้า: มักเป็นชื่อย่อหรือชื่อโรงงาน/โซนพื้นที่ต่างๆ ให้ตรวจจับและระบุเลขสาขาหรือโซนติดมาด้วยเสมอ โดยรองรับรูปแบบการเขียนทุกประเภท ดังนี้:
    - SYS: รองรับ SYS, SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
-   - GC: รองรับตั้งแต่ GC,GC1 ถึง 19 เช่น GC1 ถึง GC19, GC 1 ถึง GC 19, GC-1 ถึง GC-19, PTT GC-1 ถึง PTT GC-19
+   - GC: GC-1 (หรือ GC1, GC 1, PTT GC-1), GC-2 (หรือ GC2, GC 2, PTT GC-2), GC-3 (หรือ GC3, GC 3, PTT GC-3), GC-4 (หรือ 	GC4, GC 4, PTT GC-4), GC-5 (หรือ GC5, GC 5, PTT GC-5), GC-6 (หรือ GC6, GC 6, PTT GC-6), GC-7 (หรือ GC7, GC 7, 	PTT GC-7), GC-8 (หรือ GC8, GC 8, PTT GC-8), GC-9 (หรือ GC9, GC 9, PTT GC-9), GC-10 (หรือ GC10, GC 10, PTT 	GC-10), GC-11 (หรือ GC11, GC 11, PTT GC-11), GC-12 (หรือ GC12, GC 12, PTT GC-12), GC-13 (หรือ GC13, GC 13, PTT 	GC-13), GC-14 (หรือ GC14, GC 14, PTT GC-14), GC-15 (หรือ GC15, GC 15, PTT GC-15), GC-16 (หรือ GC16, GC 16, PTT 	GC-16), GC-17 (หรือ GC17, GC 17, PTT GC-17), GC-18 (หรือ GC18, GC 18, PTT GC-18), GC-19 (หรือ GC19, GC 19, PTT 	GC-19)
    - GGC: รองรับ GGC, GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
    - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
 2. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ"
@@ -385,7 +385,7 @@ ${allTextCombined}
 1. นำข้อมูลจากสรุปอันล่าสุดมาเป็นหลัก ห้ามทำให้ข้อมูลเก่าหายไปเด็ดขาด
 2. ชื่อบริษัทลูกค้า: มักเป็นชื่อย่อหรือชื่อโรงงาน/โซนพื้นที่ต่างๆ ให้ตรวจจับและระบุเลขสาขาหรือโซนติดมาด้วยเสมอ โดยรองรับรูปแบบการเขียนทุกประเภท ดังนี้:
    - SYS: รองรับ SYS, SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
-   - GC: รองรับตั้งแต่ GC,GC1 ถึง 19 เช่น GC1 ถึง GC19, GC 1 ถึง GC 19, GC-1 ถึง GC-19, PTT GC-1 ถึง PTT GC-19
+   - GC: GC-1 (หรือ GC1, GC 1, PTT GC-1), GC-2 (หรือ GC2, GC 2, PTT GC-2), GC-3 (หรือ GC3, GC 3, PTT GC-3), GC-4 (หรือ 	GC4, GC 4, PTT GC-4), GC-5 (หรือ GC5, GC 5, PTT GC-5), GC-6 (หรือ GC6, GC 6, PTT GC-6), GC-7 (หรือ GC7, GC 7, 	PTT GC-7), GC-8 (หรือ GC8, GC 8, PTT GC-8), GC-9 (หรือ GC9, GC 9, PTT GC-9), GC-10 (หรือ GC10, GC 10, PTT 	GC-10), GC-11 (หรือ GC11, GC 11, PTT GC-11), GC-12 (หรือ GC12, GC 12, PTT GC-12), GC-13 (หรือ GC13, GC 13, PTT 	GC-13), GC-14 (หรือ GC14, GC 14, PTT GC-14), GC-15 (หรือ GC15, GC 15, PTT GC-15), GC-16 (หรือ GC16, GC 16, PTT 	GC-16), GC-17 (หรือ GC17, GC 17, PTT GC-17), GC-18 (หรือ GC18, GC 18, PTT GC-18), GC-19 (หรือ GC19, GC 19, PTT 	GC-19)
    - GGC: รองรับ GGC, GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
    - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
 3. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ"
