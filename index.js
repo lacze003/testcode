@@ -347,7 +347,7 @@ client.on('interactionCreate', async interaction => {
             postData.isConfirmed = true;
             postData.currentSummary = parsed;
 
-        } catch (err) {
+	} catch (err) {
             console.error("Summary Error:", err);
             
             await interaction.followUp({ 
