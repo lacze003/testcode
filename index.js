@@ -149,26 +149,26 @@ client.on('messageCreate', async message => {
             }
         }
         
-        let postData = postDataMap.get(threadId);
-        
-        // ถ้าไม่มีข้อมูลใน Map (เช่น บอทรีสตาร์ท หรือสร้างโพสต์ใหม่แกะกล่อง) ให้เช็คย้อนหลังในแชท
-        if (!postData) {
-            let hasBeenConfirmed = false;
-            try {
-                const recentMsgs = await message.channel.messages.fetch({ limit: 20 });
-                for (const m of recentMsgs.values()) {
-                    if (m.author.id === client.user.id && m.embeds.length > 0) {
-                        if (m.embeds[0].title && m.embeds[0].title.includes('สรุปข้อมูลงาน')) {
-                            hasBeenConfirmed = true;
-                            break;
-                        }
+        // เช็คความจริงจาก Embed ในแชททุกครั้ง เพื่อให้รู้ว่าโพสต์นี้เคยยืนยันสรุปงานไปหรือยัง
+        let hasBeenConfirmed = false;
+        try {
+            const recentMsgs = await message.channel.messages.fetch({ limit: 50 });
+            for (const m of recentMsgs.values()) {
+                if (m.author.id === client.user.id && m.embeds.length > 0) {
+                    if (m.embeds[0].title && m.embeds[0].title.includes('สรุปข้อมูลงาน')) {
+                        hasBeenConfirmed = true;
+                        break;
                     }
                 }
-            } catch (e) {
-                console.error("Error checking past messages:", e);
             }
+        } catch (e) {
+            console.error("Error checking past messages:", e);
+        }
 
-            // [จุดสำคัญ] พยายามดึงข้อความเริ่มต้น (Starter Message) ของเธรดมาเก็บไว้ด้วย เพื่อไม่ให้โพสต์ใหม่ข้อความหาย
+        let postData = postDataMap.get(threadId);
+        
+        // ถ้าไม่มีข้อมูลใน Map ให้สร้างใหม่ทันทีโดยอิงจากสถานะจริงในแชท
+        if (!postData) {
             let initialContents = [messagePayload];
             try {
                 if (message.channel.starterMessageId) {
@@ -183,7 +183,6 @@ client.on('messageCreate', async message => {
                                 }
                             }
                         }
-                        // เอาข้อความเปิดโพสต์ขึ้นก่อน แล้วตามด้วยข้อความปัจจุบัน
                         initialContents = [starterPayload, messagePayload];
                     }
                 }
@@ -192,7 +191,6 @@ client.on('messageCreate', async message => {
             }
 
             postData = {
-                ownerId: message.author.id,
                 contents: initialContents,
                 botMessage: null,
                 isConfirmed: hasBeenConfirmed,
@@ -202,53 +200,50 @@ client.on('messageCreate', async message => {
                 updateBotMessage: null
             };
             postDataMap.set(threadId, postData);
+        } else {
+            postData.isConfirmed = hasBeenConfirmed;
+        }
 
-            // ถ้ายังไม่เคยยืนยัน ให้ส่งปุ่ม "ยืนยันข้อมูลและสรุปงาน" ออกมาทันที
-            if (!hasBeenConfirmed) {
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('confirm_summary')
-                        .setLabel('✅ ยืนยันข้อมูลและสรุปงาน')
-                        .setStyle(ButtonStyle.Success)
-                );
+        // [จุดสำคัญ] ไม่ว่าใครก็ตามที่พิมพ์เข้ามา และเธรดนี้เคยยืนยันแล้ว ปุ่มอัปเดตต้องเด้งขึ้นมาเสมอ!
+        if (postData.isConfirmed) {
+            postData.pendingUpdateContent = messagePayload.content;
+            postData.pendingUpdateImages = messagePayload.images;
 
+            const updateRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('confirm_update')
+                    .setLabel('🔄 อัปเดตข้อมูลสรุป')
+                    .setStyle(ButtonStyle.Primary) // แก้ไขคำว่า Pri ให้สมบูรณ์แล้ว
+            );
+
+            if (postData.updateBotMessage) {
+                await postData.updateBotMessage.delete().catch(() => {});
+            }
+
+            postData.updateBotMessage = await message.reply({
+                content: `📝 **ตรวจพบข้อความ/รูปภาพเพิ่มเติมจากคุณ <@${message.author.id}>** ต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
+                components: [updateRow]
+            });
+        } else {
+            // ถ้ายังไม่เคยกดยืนยันสรุปงานครั้งแรก ให้สะสมข้อความไว้รอปุ่มยืนยัน
+            postData.contents.push(messagePayload);
+            
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('confirm_summary')
+                    .setLabel('✅ ยืนยันข้อมูลและสรุปงาน')
+                    .setStyle(ButtonStyle.Success)
+            );
+
+            if (!postData.botMessage) {
                 postData.botMessage = await message.reply({
                     content: `📌 **ข้อมูลครบหรือยัง?** กดยืนยันด้านล่างได้เลย (หากมีเพิ่มพิมพ์ส่งมาได้ครับ)`,
                     components: [row]
                 });
-                return;
-            }
-        }
-
-        if (message.author.id === postData.ownerId) {
-            // เช็คสถานะ: ถ้ายืนยันไปแล้ว ให้ถือเป็นการ "อัปเดตข้อมูล"
-            if (postData.isConfirmed) {
-                postData.pendingUpdateContent = messagePayload.content;
-                postData.pendingUpdateImages = messagePayload.images;
-
-                const updateRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('confirm_update')
-                        .setLabel('🔄 อัปเดตข้อมูลสรุป')
-                        .setStyle(ButtonStyle.Primary)
-                );
-
-                if (postData.updateBotMessage) {
-                    await postData.updateBotMessage.delete().catch(() => {});
-                }
-
-                postData.updateBotMessage = await message.reply({
-                    content: `📝 **ตรวจพบข้อความ/รูปภาพเพิ่มเติม** ต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
-                    components: [updateRow]
-                });
-            } else {
-                // ถ้ายังไม่ยืนยัน ให้เก็บสะสมข้อความต่อ
-                postData.contents.push(messagePayload);
             }
         }
     }
 });
-
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
 
@@ -258,16 +253,6 @@ client.on('interactionCreate', async interaction => {
     if (!postData) {
         return interaction.reply({ 
             content: '❌ ไม่พบข้อมูลโพสต์นี้ในระบบ กรุณาลองใหม่อีกครั้ง', 
-            ephemeral: true 
-        });
-    }
-
-    const isOwner = interaction.user.id === postData.ownerId;
-    const hasSummaryRole = interaction.member && interaction.member.roles.cache.some(role => role.name.toLowerCase() === 'summary');
-
-    if (!isOwner && !hasSummaryRole) {
-        return interaction.reply({ 
-            content: '❌ เฉพาะเจ้าของโพสต์ หรือผู้ที่มีมีสิทธิ์กดปุ่มนี้ครับ', 
             ephemeral: true 
         });
     }
@@ -295,17 +280,17 @@ client.on('interactionCreate', async interaction => {
    - SYS: รองรับ SYS, SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
    - GC: รองรับ GC-1 (หรือ GC1, GC 1, PTT GC-1), GC-2 (หรือ GC2, GC 2, PTT GC-2), GC-3 (หรือ GC3, GC 3, PTT GC-3), GC-4 	(หรือ GC4, GC 4, PTT GC-4), GC-5 (หรือ GC5, GC 5, PTT GC-5), GC-6 (หรือ GC6, GC 6, PTT GC-6), GC-7 (หรือ GC7, 	GC 7, PTT GC-7), GC-8 (หรือ GC8, GC 8, PTT GC-8), GC-9 (หรือ GC9, GC 9, PTT GC-9), GC-10 (หรือ GC10, GC 10, 	PTT GC-10), GC-11 (หรือ GC11, GC 11, PTT GC-11), GC-12 (หรือ GC12, GC 12, PTT GC-12), GC-13 (หรือ GC13, GC 	13, PTT GC-13), GC-14 (หรือ GC14, GC 14, PTT GC-14), GC-15 (หรือ GC15, GC 15, PTT GC-15), GC-16 (หรือ 	GC16, GC 16, PTT GC-16), GC-17 (หรือ GC17, GC 17, PTT GC-17), GC-18 (หรือ GC18, GC 18, PTT GC-18), 	GC-19 (หรือ GC19, GC 19, PTT GC-19)
    - GGC: รองรับ GGC, GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
-   - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
-2. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ"
-3. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
+   - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ" ถ้าในอีเมล มีโลโก้ ที่เป็นชื่อบริษัท ให้ใช้ชื่ออันนั้น
+2. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ" ในเมลชื่อคนจัดชื่อไม่ใช่ชื่อลูกค้า
+3. ประเภทงาน: ระบุว่าเป็น "ทำใหม่", "เขียนแบบ" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
 4. กำหนดส่งมอบ: หากในข้อความหรือรูปแชทมีระบุวันส่งหรือคำบอกเวลา เช่น "เอาพรุ่งนี้", "ส่งวันศุกร์", หรือระบุวันที่ ให้ดึงมาตอบที่นี่ แต่ถ้าไม่มีให้ตอบว่า "ไม่ระบุ" ถ้ามีงานมากกว่า 1 อย่าง ให้ระบุรายละเอียด งานนั้นคู่กับวันที่ส่งมาด้วย
-5. เลขjob: ค้นหาเลขที่ใบงานหรือเลขอ้างอิง (เช่น รูปแบบ 6 หลัก เช่น 260000, 270000, 280000, JOB260000  หรือรูปแบบ Q เช่น Q26/300) หากไม่พบให้ตอบว่า "ยังไม่มี"
-6. รายละเอียดงาน: **บังคับต้องรวบรวมชื่อชิ้นงานและสเปกทั้งหมด**  มาใส่ไว้ที่ช่องนี้เสมอ ห้ามปล่อยว่างเด็ดขาด!
+5. เลขjob: ค้นหาเลขที่ใบงานหรือเลขอ้างอิง (เช่น รูปแบบ 6 หลัก เช่น 260000, 270000, 280000, JOB260000  หรือรูปแบบ Q เช่น Q26/300) หากไม่พบให้ตอบว่า "ยังไม่มี" ถ้าพบเลข Job ใหม่จากข้อความ/รูปภาพ ให้เปลี่ยนเป็นเลขใหม่ทันที แต่ถ้าไม่มีให้ใช้เลขเดิม หากมีข้อความพิมพ์สั่ง "เพิ่มเลข job" ให้ทำการ **นำเลข Job ใหม่มาต่อรวมกับเลข Job เดิมที่มีอยู่แล้ว** ถ้ารูปแบบของเลขjobไม่ตรงกับ ประเภทที่กำหนดไว้ ให้ขึ้น ยังไม่มี หรือให้ใช้เลขเดิม กรณีเป็นการอัพเดต (${latestSummaryData.jobNumber})
+6. รายละเอียดงาน: **บังคับต้องรวบรวมชื่อชิ้นงานและสเปกทั้งหมด** หากในรูปภาพแชทหรือข้อความใหม่มีบทสนทนาถาม-ตอบเพิ่มเติม (เช่น การระบุเกรดวัสดุ เช่น "420", สเปกชิ้นงาน หรือชื่อชิ้นงานเพิ่มเติม) ให้ดึงข้อมูลเหล่านั้นมารวมไว้ใน "รายละเอียดงาน" เสมอ มาใส่ไว้ที่ช่องนี้เสมอ ห้ามปล่อยว่างเด็ดขาด!
 
 จัดรูปแบบการตอบดังนี้:
 - ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัท หรือ ไม่ระบุ]
 - ชื่อลูกค้า: [ระบุชื่อลูกค้า หรือ ไม่ระบุ]
-- ประเภทงาน: [ทำใหม่, แก้ไข, หรือ ไม่ระบุ]
+- ประเภทงาน: [ทำใหม่, แก้ไข, เขียนแบบ หรือ ไม่ระบุ]
 - กำหนดส่งมอบ: [ระบุวันส่งมอบ หรือ ไม่ระบุ]
 - เลขjob: [ระบุเลขjob หรือ ยังไม่มี]
 - รายละเอียดงาน: [ระบุชื่อชิ้นงานและสเปกทั้งหมดที่พบ ห้ามว่าง]`;
@@ -373,7 +358,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม (อัปเดตชื่อบริษัทและเลข Job ใหม่ได้ แต่ล็อกวันที่บนชื่อโพสต์ให้เป็นวันเดิมของเธรด)
+    // 2. กดปุ่มยืนยันอัปเดตข้อมูลเพิ่มเติม
     if (interaction.customId === 'confirm_update') {
         await interaction.update({
             content: `⏳ **กำลังดึงข้อมูลจากสรุปอันล่าสุดมาอัปเดตด้วย AI...**`,
@@ -413,35 +398,33 @@ client.on('interactionCreate', async interaction => {
 - ชื่อลูกค้าเดิม: ${latestSummaryData.customerName}
 - ประเภทงาน: ${latestSummaryData.jobType}
 - กำหนดส่งมอบเดิม: ${latestSummaryData.dueDate}
-- เลขjob: ${latestSummaryData.jobNumber}
-- รายละเอียดงาน: ${latestSummaryData.jobDetails}
+- เลขjob เดิม: ${latestSummaryData.jobNumber}
+- รายละเอียดงานเดิม: ${latestSummaryData.jobDetails}
 
-ข้อความหรือข้อมูลใหม่ที่พนักงานพิมพ์เพิ่มเข้ามาในเธรด: "${postData.pendingUpdateContent}"`;
+ข้อความหรือข้อมูลใหม่ที่พิมพ์เพิ่มเข้ามา: "${postData.pendingUpdateContent || ""}"`;
 
-            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมดเพื่ออัปเดตสรุปงาน:
+            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมด รวมถึงรูปภาพแชทที่แนบมาใหม่ เพื่ออัปเดตสรุปงาน:
 ${allTextCombined}
 
 กฎการอัปเดต:
-1. นำข้อมูลจากสรุปอันล่าสุดมาเป็นหลัก ห้ามทำให้ข้อมูลเก่าหายไปเด็ดขาด
-2. หากในรูปภาพแชทหรือข้อความใหม่มีบทสนทนาถาม-ตอบเพิ่มเติม (เช่น การระบุเกรดวัสดุ เช่น "420", สเปกชิ้นงาน หรือชื่อชิ้นงานเพิ่มเติม) ให้ดึงข้อมูลเหล่านั้นมารวมไว้ใน "รายละเอียดงาน" เสมอ
-3. ชื่อบริษัทลูกค้า: มักเป็นชื่อย่อหรือชื่อโรงงาน/โซนพื้นที่ต่างๆ ให้ตรวจจับและระบุเลขสาขาหรือโซนติดมาด้วยเสมอ โดยรองรับรูปแบบการเขียนทุกประเภท ดังนี้:
+1. ชื่อบริษัทลูกค้า: มักเป็นชื่อย่อหรือชื่อโรงงาน/โซนพื้นที่ต่างๆ ให้ตรวจจับและระบุเลขสาขาหรือโซนติดมาด้วยเสมอ โดยรองรับรูปแบบการเขียนทุกประเภท ดังนี้:
    - SYS: รองรับ SYS, SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
-   - GC: GC-1 (หรือ GC1, GC 1, PTT GC-1), GC-2 (หรือ GC2, GC 2, PTT GC-2), GC-3 (หรือ GC3, GC 3, PTT GC-3), GC-4 (หรือ 	GC4, GC 4, PTT GC-4), GC-5 (หรือ GC5, GC 5, PTT GC-5), GC-6 (หรือ GC6, GC 6, PTT GC-6), GC-7 (หรือ GC7, GC 7, 	PTT GC-7), GC-8 (หรือ GC8, GC 8, PTT GC-8), GC-9 (หรือ GC9, GC 9, PTT GC-9), GC-10 (หรือ GC10, GC 10, PTT 	GC-10), GC-11 (หรือ GC11, GC 11, PTT GC-11), GC-12 (or GC12, GC 12, PTT GC-12), GC-13 (หรือ GC13, GC 13, PTT 	GC-13), GC-14 (หรือ GC14, GC 14, PTT GC-14), GC-15 (หรือ GC15, GC 15, PTT GC-15), GC-16 (หรือ GC16, GC 16, PTT 	GC-16), GC-17 (หรือ GC17, GC 17, PTT GC-17), GC-18 (หรือ GC18, GC 18, PTT GC-18), GC-19 (หรือ GC19, GC 19, PTT 	GC-19)
+   - GC: รองรับ GC-1 (หรือ GC1, GC 1, PTT GC-1), GC-2 (หรือ GC2, GC 2, PTT GC-2), GC-3 (หรือ GC3, GC 3, PTT GC-3), GC-4 	(หรือ GC4, GC 4, PTT GC-4), GC-5 (หรือ GC5, GC 5, PTT GC-5), GC-6 (หรือ GC6, GC 6, PTT GC-6), GC-7 (หรือ GC7, 	GC 7, PTT GC-7), GC-8 (หรือ GC8, GC 8, PTT GC-8), GC-9 (หรือ GC9, GC 9, PTT GC-9), GC-10 (หรือ GC10, GC 10, 	PTT GC-10), GC-11 (หรือ GC11, GC 11, PTT GC-11), GC-12 (หรือ GC12, GC 12, PTT GC-12), GC-13 (หรือ GC13, GC 	13, PTT GC-13), GC-14 (หรือ GC14, GC 14, PTT GC-14), GC-15 (หรือ GC15, GC 15, PTT GC-15), GC-16 (หรือ 	GC16, GC 16, PTT GC-16), GC-17 (หรือ GC17, GC 17, PTT GC-17), GC-18 (หรือ GC18, GC 18, PTT GC-18), 	GC-19 (หรือ GC19, GC 19, PTT GC-19)
    - GGC: รองรับ GGC, GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
-   - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ"
-4. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ"
-5. ประเภทงาน: ระบุว่าเป็น "ทำใหม่" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
-6. กำหนดส่งมอบ: หากในข้อความหรือรูปแชทมีระบุวันส่งหรือคำบอกเวลา เช่น "เอาพรุ่งนี้", "ส่งวันศุกร์", หรือระบุวันที่ ให้ดึงมาตอบที่นี่ แต่ถ้าไม่มีให้ตอบว่า "ไม่ระบุ" ถ้ามีงานมากกว่า 1 อย่าง ให้ระบุรายละเอียด งานนั้นคู่กับวันที่ส่งมาด้วย
-7. เลขjob: ค้นหาเลขที่ใบงานหรือเลขอ้างอิง เช่น รูปแบบ 6 หลัก (เช่น 260000, JOB260000, 270000, JOB270000, 280000, JOB280000  หรือรูปแบบ Q เช่น Q26/300 ) หากไม่พบให้ตอบว่า "ยังไม่มี"
-8. รายละเอียดงาน: **บังคับต้องรวบรวมชื่อชิ้นงาน สเปก และข้อมูลเพิ่มเติมใหม่ๆ (เช่น เกรดวัสดุ 420 จากรูปแชท) มาต่อท้ายหรือรวมไว้ในช่องนี้เสมอ ห้ามปล่อยว่างและห้ามทิ้งข้อมูลเก่าเด็ดขาด!**
+   - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ" ถ้าในอีเมล มีโลโก้ ที่เป็นชื่อบริษัท ให้ใช้ชื่ออันนั้น
+2. ชื่อลูกค้า: ห้ามใช้ชื่อโปรไฟล์ผู้ส่งแชท LINE เว้นแต่มีการพิมพ์ระบุชื่อลูกค้าไว้ในข้อความโดยตรง (เช่น "k.สาคร") หากไม่พบตอบว่า "ไม่ระบุ" ในรูปที่เป็นอีเมลชื่อคนจัดชื่อไม่ใช่ชื่อลูกค้า
+3. ประเภทงาน: ระบุว่าเป็น "ทำใหม่", "เขียนแบบ" หรือ "แก้ไข" หากไม่มีให้ตอบว่า "ไม่ระบุ"
+4. กำหนดส่งมอบ: หากในข้อความหรือรูปแชทมีระบุวันส่งหรือคำบอกเวลา เช่น "เอาพรุ่งนี้", "ส่งวันศุกร์", หรือระบุวันที่ ให้ดึงมาตอบที่นี่ แต่ถ้าไม่มีให้ตอบว่า "ไม่ระบุ" ถ้ามีงานมากกว่า 1 อย่าง ให้ระบุรายละเอียด งานนั้นคู่กับวันที่ส่งมาด้วย
+5. เลขjob: ค้นหาเลขที่ใบงานหรือเลขอ้างอิง (เช่น รูปแบบ 6 หลัก เช่น 260000, 270000, 280000, JOB260000  หรือรูปแบบ Q เช่น Q26/300) หากไม่พบให้ตอบว่า "ยังไม่มี" ถ้าพบเลข Job ใหม่จากข้อความ/รูปภาพ ให้เปลี่ยนเป็นเลขใหม่ทันที แต่ถ้าไม่มีให้ใช้เลขเดิม หากมีข้อความพิมพ์สั่ง "เพิ่มเลข job" ให้ทำการ **นำเลข Job ใหม่มาต่อรวมกับเลข Job เดิมที่มีอยู่แล้ว** ถ้ารูปแบบของเลขjobไม่ตรงกับ ประเภทที่กำหนดไว้ ให้ขึ้น ยังไม่มี หรือให้ใช้เลขเดิม กรณีเป็นการอัพเดต (${latestSummaryData.jobNumber})
+6. รายละเอียดงาน: **บังคับต้องรวบรวมชื่อชิ้นงานและสเปกทั้งหมด** หากในรูปภาพแชทหรือข้อความใหม่มีบทสนทนาถาม-ตอบเพิ่มเติม (เช่น การระบุเกรดวัสดุ เช่น "420", สเปกชิ้นงาน หรือชื่อชิ้นงานเพิ่มเติม) ให้ดึงข้อมูลเหล่านั้นมารวมไว้ใน "รายละเอียดงาน" เสมอ มาใส่ไว้ที่ช่องนี้เสมอ ห้ามปล่อยว่างเด็ดขาด!
 
 จัดรูปแบบการตอบดังนี้:
 - ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัทเดิมหรือที่อัปเดต]
 - ชื่อลูกค้า: [ระบุชื่อลูกค้าเดิมหรือที่อัปเดต]
 - ประเภทงาน: [ระบุประเภทงานเดิมหรือที่อัปเดต]
 - กำหนดส่งมอบ: [ระบุวันส่งมอบเดิมหรือที่อัปเดต]
-- เลขjob: [ระบุเลขjob เดิมหรือที่อัปเดต]
-- รายละเอียดงาน: [ระบุรายละเอียดงานเดิมและใหม่รวมกัน ห้ามว่าง]`;
+- เลขjob: [ระบุเลข Job ใหม่ล่าสุดที่พบเพียงชุดเดียวเพื่อแทนที่ของเดิม หากไม่มีให้ใช้เลขเดิม]
+- รายละเอียดงาน: [ระบุรายละเอียดงานเดิมและผสานข้อมูลใหม่จากรูปภาพแชทให้ครบถ้วน]`;
 
             const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
             const parsed = parseAiResponse(aiResponse, latestSummaryData.jobDetails);
