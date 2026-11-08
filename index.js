@@ -155,7 +155,7 @@ client.on('messageCreate', async message => {
         if (!postData) {
             let hasBeenConfirmed = false;
             try {
-                const recentMsgs = await message.channel.messages.fetch({ limit: 50 });
+                const recentMsgs = await message.channel.messages.fetch({ limit: 20 });
                 for (const m of recentMsgs.values()) {
                     if (m.author.id === client.user.id && m.embeds.length > 0) {
                         if (m.embeds[0].title && m.embeds[0].title.includes('สรุปข้อมูลงาน')) {
@@ -220,7 +220,7 @@ client.on('messageCreate', async message => {
             }
         }
 
-        // [เปิดให้ทุกคนในเธรดพิมพ์แล้วปุ่มอัปเดตเด้งขึ้นมาได้ทันทีเมื่อเคยยืนยันแล้ว]
+        // [ปลดล็อกให้ทุกคนในเธรดช่วยกันพิมพ์อัปเดตข้อมูลพร้อมเด้งปุ่มเรียกอัปเดตได้ทันที]
         if (postData.isConfirmed) {
             postData.pendingUpdateContent = messagePayload.content;
             postData.pendingUpdateImages = messagePayload.images;
@@ -237,7 +237,7 @@ client.on('messageCreate', async message => {
             }
 
             postData.updateBotMessage = await message.reply({
-                content: `📝 **ตรวจพบข้อความ/รูปภาพเพิ่มเติมจากคุณ <@${message.author.id}>** ต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
+                content: `📝 **ตรวจพบข้อความ/รูปภาพเพิ่มเติม** ต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
                 components: [updateRow]
             });
         } else {
@@ -246,6 +246,7 @@ client.on('messageCreate', async message => {
         }
     }
 });
+
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
 
