@@ -149,26 +149,26 @@ client.on('messageCreate', async message => {
             }
         }
         
-        // เช็คความจริงจาก Embed ในแชททุกครั้ง เพื่อให้รู้ว่าโพสต์นี้เคยยืนยันสรุปงานไปหรือยัง
-        let hasBeenConfirmed = false;
-        try {
-            const recentMsgs = await message.channel.messages.fetch({ limit: 50 });
-            for (const m of recentMsgs.values()) {
-                if (m.author.id === client.user.id && m.embeds.length > 0) {
-                    if (m.embeds[0].title && m.embeds[0].title.includes('สรุปข้อมูลงาน')) {
-                        hasBeenConfirmed = true;
-                        break;
-                    }
-                }
-            }
-        } catch (e) {
-            console.error("Error checking past messages:", e);
-        }
-
         let postData = postDataMap.get(threadId);
         
-        // ถ้าไม่มีข้อมูลใน Map ให้สร้างใหม่ทันทีโดยอิงจากสถานะจริงในแชท
+        // ถ้าไม่มีข้อมูลใน Map (เช่น บอทรีสตาร์ท หรือสร้างโพสต์ใหม่แกะกล่อง) ให้เช็คย้อนหลังในแชท
         if (!postData) {
+            let hasBeenConfirmed = false;
+            try {
+                const recentMsgs = await message.channel.messages.fetch({ limit: 50 });
+                for (const m of recentMsgs.values()) {
+                    if (m.author.id === client.user.id && m.embeds.length > 0) {
+                        if (m.embeds[0].title && m.embeds[0].title.includes('สรุปข้อมูลงาน')) {
+                            hasBeenConfirmed = true;
+                            break;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Error checking past messages:", e);
+            }
+
+            // [จุดสำคัญ] พยายามดึงข้อความเริ่มต้น (Starter Message) ของเธรดมาเก็บไว้ด้วย เพื่อไม่ให้โพสต์ใหม่ข้อความหาย
             let initialContents = [messagePayload];
             try {
                 if (message.channel.starterMessageId) {
@@ -183,6 +183,7 @@ client.on('messageCreate', async message => {
                                 }
                             }
                         }
+                        // เอาข้อความเปิดโพสต์ขึ้นก่อน แล้วตามด้วยข้อความปัจจุบัน
                         initialContents = [starterPayload, messagePayload];
                     }
                 }
@@ -191,6 +192,7 @@ client.on('messageCreate', async message => {
             }
 
             postData = {
+                ownerId: message.author.id,
                 contents: initialContents,
                 botMessage: null,
                 isConfirmed: hasBeenConfirmed,
@@ -200,11 +202,25 @@ client.on('messageCreate', async message => {
                 updateBotMessage: null
             };
             postDataMap.set(threadId, postData);
-        } else {
-            postData.isConfirmed = hasBeenConfirmed;
+
+            // ถ้ายังไม่เคยยืนยัน ให้ส่งปุ่ม "ยืนยันข้อมูลและสรุปงาน" ออกมาทันที
+            if (!hasBeenConfirmed) {
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('confirm_summary')
+                        .setLabel('✅ ยืนยันข้อมูลและสรุปงาน')
+                        .setStyle(ButtonStyle.Success)
+                );
+
+                postData.botMessage = await message.reply({
+                    content: `📌 **ข้อมูลครบหรือยัง?** กดยืนยันด้านล่างได้เลย (หากมีเพิ่มพิมพ์ส่งมาได้ครับ)`,
+                    components: [row]
+                });
+                return;
+            }
         }
 
-        // [จุดสำคัญ] ไม่ว่าใครก็ตามที่พิมพ์เข้ามา และเธรดนี้เคยยืนยันแล้ว ปุ่มอัปเดตต้องเด้งขึ้นมาเสมอ!
+        // [เปิดให้ทุกคนในเธรดพิมพ์แล้วปุ่มอัปเดตเด้งขึ้นมาได้ทันทีเมื่อเคยยืนยันแล้ว]
         if (postData.isConfirmed) {
             postData.pendingUpdateContent = messagePayload.content;
             postData.pendingUpdateImages = messagePayload.images;
@@ -213,7 +229,7 @@ client.on('messageCreate', async message => {
                 new ButtonBuilder()
                     .setCustomId('confirm_update')
                     .setLabel('🔄 อัปเดตข้อมูลสรุป')
-                    .setStyle(ButtonStyle.Primary) // แก้ไขคำว่า Pri ให้สมบูรณ์แล้ว
+                    .setStyle(ButtonStyle.Primary)
             );
 
             if (postData.updateBotMessage) {
@@ -225,22 +241,8 @@ client.on('messageCreate', async message => {
                 components: [updateRow]
             });
         } else {
-            // ถ้ายังไม่เคยกดยืนยันสรุปงานครั้งแรก ให้สะสมข้อความไว้รอปุ่มยืนยัน
+            // ถ้ายังไม่ยืนยัน ให้เก็บสะสมข้อความต่อ
             postData.contents.push(messagePayload);
-            
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('confirm_summary')
-                    .setLabel('✅ ยืนยันข้อมูลและสรุปงาน')
-                    .setStyle(ButtonStyle.Success)
-            );
-
-            if (!postData.botMessage) {
-                postData.botMessage = await message.reply({
-                    content: `📌 **ข้อมูลครบหรือยัง?** กดยืนยันด้านล่างได้เลย (หากมีเพิ่มพิมพ์ส่งมาได้ครับ)`,
-                    components: [row]
-                });
-            }
         }
     }
 });
