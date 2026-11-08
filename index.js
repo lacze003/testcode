@@ -347,14 +347,9 @@ client.on('interactionCreate', async interaction => {
             postData.isConfirmed = true;
             postData.currentSummary = parsed;
 
-	} catch (err) {
+        } catch (err) {
             console.error("Summary Error:", err);
             
-            await interaction.followUp({ 
-                content: `❌ เกิดข้อผิดพลาด: ${err.message}`, 
-                ephemeral: true 
-            });
-
             if (postData.botMessage) {
                 const retryRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
@@ -451,7 +446,6 @@ ${allTextCombined}
             const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
             const parsed = parseAiResponse(aiResponse, latestSummaryData.jobDetails);
 
-            // ดึงวันที่เดิมจากชื่อเธรดปัจจุบันมารักษาไว้
             let originalDateStr = new Date().toISOString().split('T')[0];
             try {
                 const threadNameParts = interaction.channel.name.split(' - ');
@@ -501,11 +495,6 @@ ${allTextCombined}
 
         } catch (err) {
             console.error("Update Error:", err);
-            
-            await interaction.followUp({ 
-                content: `❌ เกิดข้อผิดพลาดในการอัปเดต: ${err.message}`, 
-                ephemeral: true 
-            });
 
             if (postData.updateBotMessage) {
                 const retryUpdateRow = new ActionRowBuilder().addComponents(
