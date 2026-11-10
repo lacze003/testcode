@@ -263,14 +263,41 @@ client.on('interactionCreate', async interaction => {
     // 1. กดปุ่มยืนยันสรุปงานครั้งแรก
     if (interaction.customId === 'confirm_summary') {
         await interaction.update({
-            content: `⏳ **กำลังประมวลผลข้อมูลและรูปภาพด้วย AI...**`,
+            content: `⏳ **กำลังดึงข้อความและรูปภาพทั้งหมดในโพสต์มาประมวลผลด้วย AI...**`,
             components: []
         });
 
-        const textContents = postData.contents.map(c => c.content).filter(Boolean).join('\n');
-        const allImages = postData.contents.flatMap(c => c.images);
-
         try {
+            // [จุดแก้หลัก] ดึงข้อความทั้งหมดในเธรดนี้ย้อนหลังมาวิเคราะห์รวดเดียว (สูงสุด 50 ข้อความ)
+            const fetchedMessages = await interaction.channel.messages.fetch({ limit: 50 });
+            
+            let allTextParts = [];
+            let allImageParts = [];
+
+            // วนลูปเก็บข้อความและรูปภาพทั้งหมดจากเก่าไปใหม่ เพื่อให้เรียงลำดับถูกต้อง
+            const sortedMessages = Array.from(fetchedMessages.values()).reverse();
+            for (const msg of sortedMessages) {
+                // ข้ามข้อความของบอทเอง เอาเฉพาะข้อความของคนส่ง
+                if (msg.author.id === client.user.id) continue;
+
+                if (msg.content) {
+                    allTextParts.push(msg.content);
+                }
+                if (msg.attachments.size > 0) {
+                    for (const att of msg.attachments.values()) {
+                        if (att.contentType && att.contentType.startsWith('image/')) {
+                            const imgP = await urlToGenerativePart(att.url, att.contentType);
+                            if (imgP) {
+                                allImageParts.push(imgP);
+                            }
+                        }
+                    }
+                }
+            }
+
+            const textContents = allTextParts.join('\n');
+            const allImages = allImageParts;
+
             const prompt = `วิเคราะห์โพสต์งานโรงกลึงจากข้อความและรูปภาพที่แนบมานี้: "${textContents}"
 
 กฎการอ่านภาพแชท LINE เคร่งครัด:
