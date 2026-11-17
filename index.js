@@ -1,4 +1,3 @@
-
 require('dotenv').config();
 const express = require('express');
 const { 
@@ -15,11 +14,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('Machining Master Bot is online!');
+    res.send('Machining Owner Bot is online!');
 });
 
 app.listen(PORT, () => {
-    console.log(`Master Bot Server listening on port ${PORT}`);
+    console.log(`Owner Server listening on port ${PORT}`);
 });
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -40,7 +39,6 @@ async function urlToGenerativePart(url, mimeType) {
     }
 }
 
-// ใช้ระบบดึงชื่อโมเดลจาก .env โดยมีค่าสำรองมาตรฐานป้องกันโค้ดพัง
 async function callGeminiWithFallback(promptText, imageParts = []) {
     const apiKeys = [
         process.env.GEMINI_API_KEY_1,
@@ -49,14 +47,12 @@ async function callGeminiWithFallback(promptText, imageParts = []) {
     ].filter(Boolean);
 
     if (apiKeys.length === 0) {
-        throw new Error("ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน Environment Variables");
+        throw new Error("ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน Environment Variables ของ Render");
     }
 
-    const primaryModel = process.env.GEMINI_MODEL_NAME || "gemini-3.8-flash";
     const modelsToTry = [
-        primaryModel,
         "gemini-3.5-flash-lite",
-        "gemini-flash"
+        "gemini-3.8-flash"
     ];
     
     let lastError = null;
@@ -128,7 +124,7 @@ const client = new Client({
 const postDataMap = new Map();
 
 client.once('ready', () => {
-    console.log(`Master Machining Bot Logged in as ${client.user.tag}!`);
+    console.log(`Owner Bot Logged in as ${client.user.tag}!`);
 });
 
 client.on('messageCreate', async message => {
@@ -155,6 +151,7 @@ client.on('messageCreate', async message => {
         
         let postData = postDataMap.get(threadId);
         
+        // ถ้าไม่มีข้อมูลใน Map (เช่น บอทรีสตาร์ท หรือสร้างโพสต์ใหม่แกะกล่อง) ให้เช็คย้อนหลังในแชท
         if (!postData) {
             let hasBeenConfirmed = false;
             try {
@@ -171,15 +168,42 @@ client.on('messageCreate', async message => {
                 console.error("Error checking past messages:", e);
             }
 
+            // [จุดสำคัญ] พยายามดึงข้อความเริ่มต้น (Starter Message) ของเธรดมาเก็บไว้ด้วย เพื่อไม่ให้โพสต์ใหม่ข้อความหาย
+            let initialContents = [messagePayload];
+            try {
+                if (message.channel.starterMessageId) {
+                    const starterMsg = await message.channel.messages.fetch(message.channel.starterMessageId).catch(() => null);
+                    if (starterMsg && starterMsg.id !== message.id) {
+                        let starterPayload = { content: starterMsg.content || "", images: [] };
+                        if (starterMsg.attachments.size > 0) {
+                            for (const att of starterMsg.attachments.values()) {
+                                if (att.contentType && att.contentType.startsWith('image/')) {
+                                    const imgP = await urlToGenerativePart(att.url, att.contentType);
+                                    if (imgP) starterPayload.images.push(imgP);
+                                }
+                            }
+                        }
+                        // เอาข้อความเปิดโพสต์ขึ้นก่อน แล้วตามด้วยข้อความปัจจุบัน
+                        initialContents = [starterPayload, messagePayload];
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching starter message:", err);
+            }
+
             postData = {
                 ownerId: message.author.id,
+                contents: initialContents,
                 botMessage: null,
                 isConfirmed: hasBeenConfirmed,
                 currentSummary: null,
+                pendingUpdateContent: null,
+                pendingUpdateImages: [],
                 updateBotMessage: null
             };
             postDataMap.set(threadId, postData);
 
+            // ถ้ายังไม่เคยยืนยัน ให้ส่งปุ่ม "ยืนยันข้อมูลและสรุปงาน" ออกมาทันที
             if (!hasBeenConfirmed) {
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
@@ -196,7 +220,11 @@ client.on('messageCreate', async message => {
             }
         }
 
+        // [ปลดล็อกให้ทุกคนในเธรดช่วยกันพิมพ์อัปเดตข้อมูลพร้อมเด้งปุ่มเรียกอัปเดตได้ทันที]
         if (postData.isConfirmed) {
+            postData.pendingUpdateContent = messagePayload.content;
+            postData.pendingUpdateImages = messagePayload.images;
+
             const updateRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('confirm_update')
@@ -212,6 +240,9 @@ client.on('messageCreate', async message => {
                 content: `📝 **ตรวจพบข้อความ/รูปภาพเพิ่มเติม** ต้องการกดอัปเดตข้อมูลสรุปงานใหม่ไหมครับ?`,
                 components: [updateRow]
             });
+        } else {
+            // ถ้ายังไม่ยืนยัน ให้เก็บสะสมข้อความต่อ
+            postData.contents.push(messagePayload);
         }
     }
 });
@@ -220,11 +251,13 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
 
     const threadId = interaction.channel.id;
-    let postData = postDataMap.get(threadId);
+    const postData = postDataMap.get(threadId);
 
     if (!postData) {
-        postData = { isConfirmed: false };
-        postDataMap.set(threadId, postData);
+        return interaction.reply({ 
+            content: '❌ ไม่พบข้อมูลโพสต์นี้ในระบบ กรุณาลองใหม่อีกครั้ง', 
+            ephemeral: true 
+        });
     }
 
     // 1. กดปุ่มยืนยันสรุปงานครั้งแรก
@@ -235,13 +268,16 @@ client.on('interactionCreate', async interaction => {
         });
 
         try {
+            // [จุดแก้หลัก] ดึงข้อความทั้งหมดในเธรดนี้ย้อนหลังมาวิเคราะห์รวดเดียว (สูงสุด 50 ข้อความ)
             const fetchedMessages = await interaction.channel.messages.fetch({ limit: 50 });
             
             let allTextParts = [];
             let allImageParts = [];
 
+            // วนลูปเก็บข้อความและรูปภาพทั้งหมดจากเก่าไปใหม่ เพื่อให้เรียงลำดับถูกต้อง
             const sortedMessages = Array.from(fetchedMessages.values()).reverse();
             for (const msg of sortedMessages) {
+                // ข้ามข้อความของบอทเอง เอาเฉพาะข้อความของคนส่ง
                 if (msg.author.id === client.user.id) continue;
 
                 if (msg.content) {
@@ -276,7 +312,6 @@ client.on('interactionCreate', async interaction => {
    - SYS: รองรับ SYS, SYS1, SYS 1, SYS-1, SYS2, SYS 2, SYS-2
    - GC: รองรับ GC-1 (หรือ GC1, GC 1, PTT GC-1), GC-2 (หรือ GC2, GC 2, PTT GC-2), GC-3 (หรือ GC3, GC 3, PTT GC-3), GC-4 	(หรือ GC4, GC 4, PTT GC-4), GC-5 (หรือ GC5, GC 5, PTT GC-5), GC-6 (หรือ GC6, GC 6, PTT GC-6), GC-7 (หรือ GC7, 	GC 7, PTT GC-7), GC-8 (หรือ GC8, GC 8, PTT GC-8), GC-9 (หรือ GC9, GC 9, PTT GC-9), GC-10 (หรือ GC10, GC 10, 	PTT GC-10), GC-11 (หรือ GC11, GC 11, PTT GC-11), GC-12 (หรือ GC12, GC 12, PTT GC-12), GC-13 (หรือ GC13, GC 	13, PTT GC-13), GC-14 (หรือ GC14, GC 14, PTT GC-14), GC-15 (หรือ GC15, GC 15, PTT GC-15), GC-16 (หรือ 	GC16, GC 16, PTT GC-16), GC-17 (หรือ GC17, GC 17, PTT GC-17), GC-18 (หรือ GC18, GC 18, PTT GC-18), 	GC-19 (หรือ GC19, GC 19, PTT GC-19)
    - GGC: รองรับ GGC, GGC2, GGC 2, GGC-2, GGC หนองใหญ่, GGC-หนองใหญ่, หรือคำว่า หนองใหญ่
-     - GCME มักจะถูกเขียนแค่ me หรือ ME  
    - หรือบริษัทอื่นๆ (เช่น CGS, GCME, OSC, COA, GME, GCM, PTT LNG, PTTGC, RMS, SAP, SCG, SRI, SRT, TAS, THAI MMA, TMU, RUNOUN, POS THAINOK, AKS, ATM, BAY, BLCP, BPT, CEM, CHE, COV, CSA, DOWELTECH, DTM, EFF, GLOW, ITT, MOC, MPS, MSS, PAC, POS, PPS) หากไม่มีให้ตอบว่า "ไม่ระบุ" ถ้าในอีเมล มีโลโก้ ที่เป็นชื่อบริษัท ให้ใช้อันนั้น
       - **กฎเหล็กชื่อบริษัท (Exact Match Only):** ให้ดึงเฉพาะชื่อบริษัทหรือสาขา "ตามที่พิมพ์ระบุไว้ในข้อความจริงๆ เท่านั้น" 
    - **ห้าม AI ต่อเติมหรือคิดคำเอาเองเด็ดขาด:** หากในข้อความพิมพ์มาแค่ "GGC" ให้ตอบว่า "GGC" เท่านั้น ห้ามเติมคำว่า "หนองใหญ่" หรือชื่อพื้นที่อื่นเข้ามาเองถ้าไม่ได้พิมพ์ระบุไว้ หากไม่พบชื่อบริษัทในข้อความให้ตอบว่า "ไม่ระบุ"
@@ -350,16 +385,19 @@ client.on('interactionCreate', async interaction => {
 
         } catch (err) {
             console.error("Summary Error:", err);
-            const retryRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('confirm_summary')
-                    .setLabel('✅ ยืนยันข้อมูลและสรุปงาน')
-                    .setStyle(ButtonStyle.Success)
-            );
-            await interaction.editReply({
-                content: `❌ **เกิดข้อผิดพลาดในการประมวลผล:** ${err.message}\n(สามารถกดยืนยันใหม่อีกครั้งได้เลยครับ)`,
-                components: [retryRow]
-            }).catch(() => {});
+            
+            if (postData.botMessage) {
+                const retryRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('confirm_summary')
+                        .setLabel('✅ ยืนยันข้อมูลและสรุปงาน')
+                        .setStyle(ButtonStyle.Success)
+                );
+                await interaction.editReply({
+                    content: `❌ **เกิดข้อผิดพลาดในการประมวลผล:** ${err.message}\n(สามารถกดยืนยันใหม่อีกครั้งได้เลยครับ)`,
+                    components: [retryRow]
+                }).catch(() => {});
+            }
         }
     }
 
@@ -381,8 +419,6 @@ client.on('interactionCreate', async interaction => {
             };
 
             const messages = await interaction.channel.messages.fetch({ limit: 100 });
-            let allImageParts = [];
-
             for (const msg of messages.values()) {
                 if (msg.author.id === client.user.id && msg.embeds.length > 0) {
                     const embed = msg.embeds[0];
@@ -398,26 +434,19 @@ client.on('interactionCreate', async interaction => {
                         break;
                     }
                 }
-                // เก็บภาพใหม่ๆ ที่ส่งเข้ามาเพิ่มในเธรดด้วย
-                if (msg.author.id !== client.user.id && msg.attachments.size > 0) {
-                    for (const att of msg.attachments.values()) {
-                        if (att.contentType && att.contentType.startsWith('image/')) {
-                            const imgP = await urlToGenerativePart(att.url, att.contentType);
-                            if (imgP) allImageParts.push(imgP);
-                        }
-                    }
-                }
             }
 
             const allTextCombined = `ข้อมูลเดิมจากสรุปอันล่าสุดในแชท:
 - ชื่อบริษัทลูกค้า: ${latestSummaryData.companyName}
-- ชื่อลูกค้า: ${latestSummaryData.customerName}
+- ชื่อลูกค้าเดิม: ${latestSummaryData.customerName}
 - ประเภทงาน: ${latestSummaryData.jobType}
-- กำหนดส่งมอบ: ${latestSummaryData.dueDate}
+- กำหนดส่งมอบเดิม: ${latestSummaryData.dueDate}
 - เลขjob เดิม: ${latestSummaryData.jobNumber}
-- รายละเอียดงานเดิม: ${latestSummaryData.jobDetails}`;
+- รายละเอียดงานเดิม: ${latestSummaryData.jobDetails}
 
-            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมดเพื่ออัปเดตสรุปงาน:
+ข้อความหรือข้อมูลใหม่ที่พิมพ์เพิ่มเข้ามา: "${postData.pendingUpdateContent || ""}"`;
+
+            const updatePrompt = `วิเคราะห์ข้อมูลทั้งหมด รวมถึงรูปภาพแชทที่แนบมาใหม่ เพื่ออัปเดตสรุปงาน:
 ${allTextCombined}
 
 กฎการอัปเดต:
@@ -449,7 +478,6 @@ ${allTextCombined}
      * คำทับศัพท์ภาษาอังกฤษทั้งหมด (เช่น เช็ครันเอาท์, แบริ่ง, มัดจำ, สเปก, แคป, คอนเนคเตอร์ หรือคำอื่นๆ) **ต้องสะกดด้วยภาษาไทยและภาษาอังกฤษที่ถูกต้องตามมาตรฐานเท่านั้น**
      * **ห้ามมีตัวอักษรภาษาเกาหลี (เช่น 런), ญี่ปุ่น, จีน หรือตัวอักษรต่างดาวใดๆ แทรกอยู่กลางคำหรือในประโยคเด็ดขาด** หากพบให้แปลงเป็นภาษาไทยที่ถูกต้องทันที
 
-
 จัดรูปแบบการตอบดังนี้:
 - ชื่อบริษัทลูกค้า: [ระบุชื่อบริษัทเดิมหรือที่อัปเดต]
 - ชื่อลูกค้า: [ระบุชื่อลูกค้าเดิมหรือที่อัปเดต]
@@ -458,7 +486,7 @@ ${allTextCombined}
 - เลขjob: [ระบุเลข Job ใหม่ล่าสุดที่พบเพียงชุดเดียวเพื่อแทนที่ของเดิม หากไม่มีให้ใช้เลขเดิม]
 - รายละเอียดงาน: [ระบุรายละเอียดงานเดิมและผสานข้อมูลใหม่จากรูปภาพแชทให้ครบถ้วน]`;
 
-            const aiResponse = await callGeminiWithFallback(updatePrompt, allImageParts);
+            const aiResponse = await callGeminiWithFallback(updatePrompt, postData.pendingUpdateImages);
             const parsed = parseAiResponse(aiResponse, latestSummaryData.jobDetails);
 
             let originalDateStr = new Date().toISOString().split('T')[0];
@@ -468,7 +496,7 @@ ${allTextCombined}
                     originalDateStr = threadNameParts[0].trim();
                 }
             } catch (err) {
-                console.error("Error extracting original date:", err);
+                console.error("Error extracting original date from thread name:", err);
             }
 
             let newThreadName = `${originalDateStr} - ${parsed.companyName !== "ไม่ระบุ" ? parsed.companyName : "งานอัปเดต"}`;
@@ -505,19 +533,24 @@ ${allTextCombined}
             }
 
             postData.currentSummary = parsed;
+            postData.pendingUpdateContent = null;
+            postData.pendingUpdateImages = [];
 
         } catch (err) {
             console.error("Update Error:", err);
-            const retryUpdateRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('confirm_update')
-                    .setLabel('🔄 อัปเดตข้อมูลสรุป')
-                    .setStyle(ButtonStyle.Primary)
-            );
-            await interaction.editReply({
-                content: `❌ **เกิดข้อผิดพลาดในการอัปเดต:** ${err.message}\n(สามารถกดปุ่มอัปเดตใหม่อีกครั้งได้เลยครับ)`,
-                components: [retryUpdateRow]
-            }).catch(() => {});
+
+            if (postData.updateBotMessage) {
+                const retryUpdateRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('confirm_update')
+                        .setLabel('🔄 อัปเดตข้อมูลสรุป')
+                        .setStyle(ButtonStyle.Primary)
+                );
+                await interaction.editReply({
+                    content: `❌ **เกิดข้อผิดพลาดในการอัปเดต:** ${err.message}\n(สามารถกดปุ่มอัปเดตใหม่อีกครั้งได้เลยครับ)`,
+                    components: [retryUpdateRow]
+                }).catch(() => {});
+            }
         }
     }
 });
